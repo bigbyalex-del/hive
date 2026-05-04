@@ -8,6 +8,7 @@ import { listProviders } from './providers/registry';
 import { transcribeAudio } from './voice';
 import { captureScreen, snipRegion } from './screenshot';
 import { speak } from './tts';
+import { loadDefaultMcpServers, shutdownAllMcp } from './mcp';
 
 dotenv.config({ path: path.join(__dirname, '..', '..', '.env') });
 
@@ -112,6 +113,10 @@ app.whenReady().then(() => {
   }
 
   createWindow();
+
+  // Kick off MCP server connections in the background — workers see new tools
+  // when servers come online (typically within a few seconds).
+  loadDefaultMcpServers().catch(err => console.error('[hive] MCP init failed:', err));
 
   orchestrator = new Orchestrator((evt: AgentEvent) => {
     mainWindow?.webContents.send(IPC.AgentEvent, evt);
@@ -235,9 +240,11 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
   globalShortcut.unregisterAll();
   orchestrator?.shutdown();
+  shutdownAllMcp().catch(() => { /* ignore */ });
   if (process.platform !== 'darwin') app.quit();
 });
 
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
+  shutdownAllMcp().catch(() => { /* ignore */ });
 });

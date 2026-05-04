@@ -11,6 +11,7 @@ import * as path from 'path';
 import { spawn } from 'child_process';
 import { Provider, RunOptions, RunResult, RunEvents, ToolDef } from './types';
 import { validateCommand, audit } from '../runtime';
+import { getMcpToolsForWorker } from '../mcp';
 
 const dynamicImport = new Function('m', 'return import(m)') as (m: string) => Promise<any>;
 
@@ -223,10 +224,13 @@ export class AnthropicProvider implements Provider {
   async run(model: string, opts: RunOptions, events: RunEvents): Promise<RunResult> {
     const client = await getClient();
 
-    // Tools: caller-provided OR built-in file tools (only if cwd is set).
-    const tools: ToolDef[] = opts.tools?.length
+    // Tools: caller-provided OR built-in file tools (only if cwd is set),
+    // augmented with any MCP-server tools currently connected.
+    const baseTools: ToolDef[] = opts.tools?.length
       ? opts.tools
       : (opts.cwd && fsSync.existsSync(opts.cwd) ? fileTools(opts.cwd) : []);
+    const mcpTools = getMcpToolsForWorker();
+    const tools: ToolDef[] = [...baseTools, ...mcpTools];
 
     const apiTools = tools.map(t => ({
       name: t.name,
