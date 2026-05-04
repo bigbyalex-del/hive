@@ -222,15 +222,19 @@ export class AnthropicProvider implements Provider {
   models = ['claude-opus-4-7', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'];
 
   async run(model: string, opts: RunOptions, events: RunEvents): Promise<RunResult> {
+    if (!opts.prompt || !opts.prompt.trim()) {
+      throw new Error('cannot run with empty prompt — caller dispatched a blank task');
+    }
     const client = await getClient();
 
     // Tools: caller-provided OR built-in file tools (only if cwd is set),
     // augmented with any MCP-server tools currently connected.
+    // Manager passes noTools:true so it doesn't waste its single turn on tools.
     const baseTools: ToolDef[] = opts.tools?.length
       ? opts.tools
       : (opts.cwd && fsSync.existsSync(opts.cwd) ? fileTools(opts.cwd) : []);
-    const mcpTools = getMcpToolsForWorker();
-    const tools: ToolDef[] = [...baseTools, ...mcpTools];
+    const mcpTools = opts.noTools ? [] : getMcpToolsForWorker();
+    const tools: ToolDef[] = opts.noTools ? [] : [...baseTools, ...mcpTools];
 
     const apiTools = tools.map(t => ({
       name: t.name,

@@ -22,6 +22,7 @@ export interface RunOptions {
   maxTurns?: number;
   cwd?: string; // working directory for file tools
   abortSignal?: AbortSignal; // user-cancel
+  noTools?: boolean; // Manager-style: pure text routing, no tools injected
 }
 
 export interface RunResult {

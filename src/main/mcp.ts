@@ -88,6 +88,23 @@ export async function connectMcpServer(config: McpServerConfig): Promise<McpClie
     };
     activeClients.set(config.name, wrapper);
     console.log(`[hive] MCP connected: ${config.name} (${tools.length} tools)`);
+    console.log(`[hive] MCP ${config.name} args: ${JSON.stringify(config.args)}`);
+    console.log(`[hive] MCP ${config.name} tools:`, tools.map(t => t.name).join(', '));
+
+    // Sanity: try the server's "list_allowed_directories" tool if present, so
+    // the main-process console shows us exactly where the server is rooted.
+    const lad = toolList.tools.find((t: any) => t.name === 'list_allowed_directories');
+    if (lad) {
+      try {
+        const probe = await client.callTool({ name: 'list_allowed_directories', arguments: {} });
+        const txt = Array.isArray(probe.content)
+          ? probe.content.map((b: any) => b.type === 'text' ? b.text : JSON.stringify(b)).join('\n')
+          : JSON.stringify(probe);
+        console.log(`[hive] MCP ${config.name} roots: ${txt}`);
+      } catch (e: any) {
+        console.log(`[hive] MCP ${config.name} root probe failed:`, e?.message ?? e);
+      }
+    }
     return wrapper;
   } catch (err: any) {
     console.error(`[hive] MCP connect failed for ${config.name}:`, err?.message ?? err);
@@ -101,6 +118,14 @@ export async function loadDefaultMcpServers(): Promise<ToolDef[]> {
       name: 'fs',
       command: 'npx',
       args: ['-y', '@modelcontextprotocol/server-filesystem', path.join(process.cwd(), 'worktrees')],
+    },
+    {
+      // Web Fetch — workers gain HTTP GET access (with the server's own
+      // safety defaults around redirects, sizes, etc). Useful for reading
+      // npm READMEs, MDN docs, GitHub raw files before writing code.
+      name: 'fetch',
+      command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-fetch'],
     },
   ];
 

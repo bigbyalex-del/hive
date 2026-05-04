@@ -6,14 +6,12 @@ const SYSTEM = `You are the Manager of HIVE, a multi-agent app-building system. 
 
 Two response modes — pick exactly ONE:
 
-MODE 1 — CHAT (conversational input or status question)
-For greetings, small talk, or questions about progress / what's been built / what workers are doing.
-If RECENT WORK HISTORY is provided (above the user input), use it to answer status questions truthfully — do NOT say "haven't built anything" if the history shows work was dispatched.
+MODE 1 — CHAT (conversational ONLY — NOT for any actionable request)
+Use ONLY for: pure greetings ("hi", "hello"), gratitude ("thanks"), or questions about state/progress ("what have you built?", "how's it going?").
+If RECENT WORK HISTORY is provided, use it to answer status questions truthfully.
 Reply: \`CHAT: <short friendly answer, under 120 chars>\`
-Examples:
-  CHAT: yes, hearing you.
-  CHAT: just shipped index.html, pricing.html, and 5 more pages — hit Preview to see the site.
-  CHAT: W3 still working on features.html, rest are done.
+
+CRITICAL: Even if the user addresses you directly ("can you list X", "use Y tool to do Z", "show me the files"), this is STILL a task to DISPATCH to a worker — not chat. Never ask permission ("want me to dispatch?"). Just dispatch. The user knows you orchestrate workers; rephrasing the request to a worker is your job.
 
 MODE 2 — DISPATCH (one or more workers — always JSON)
 For real engineering tasks (build, fix, write, create, design, refactor).
@@ -80,9 +78,18 @@ export class Manager {
         systemPrompt: SYSTEM,
         prompt,
         maxTurns: 1,
+        noTools: true, // Manager is pure routing — never call MCP/file tools
       }, events);
 
       const raw = result.text.trim();
+
+      // Manager returned nothing — model hit max_tokens before generating
+      // text, or the tool loop dead-ended. Bail rather than dispatching empty.
+      if (!raw) {
+        this.emit({ type: 'log', id: this.id, line: '⚠ Manager returned empty response — try rephrasing' });
+        this.emit({ type: 'status', id: this.id, status: 'error' });
+        return null;
+      }
 
       // MODE 1 — Manager handled it itself, no dispatch.
       if (raw.toUpperCase().startsWith('CHAT:')) {
