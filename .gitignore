@@ -1,0 +1,11 @@
+node_modules/
+dist/
+worktrees/
+.env
+.env.local
+*.log
+.DS_Store
+hive.db
+hive.db-journal
+.vscode/
+.idea/

@@ -1,0 +1,31 @@
+{
+  "name": "youraihive",
+  "productName": "Hive",
+  "version": "0.1.0",
+  "description": "YourAIHive — multi-agent app-building tool. 1 Manager + 8 Workers in a spatial dashboard.",
+  "homepage": "https://youraihive.com",
+  "private": true,
+  "main": "dist/main/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "npm run build && electron .",
+    "dev": "tsc --watch",
+    "clean": "rimraf dist worktrees"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.1.0",
+    "@anthropic-ai/sdk": "^0.93.0",
+    "dotenv": "^16.4.5",
+    "openai": "^4.70.0",
+    "simple-git": "^3.27.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.0",
+    "electron": "^33.0.0",
+    "rimraf": "^6.0.1",
+    "typescript": "^5.6.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

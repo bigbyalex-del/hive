@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Hive</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <div class="titlebar">
+    <div class="brand">◇ HIVE <span style="color:var(--muted);font-weight:400;">— multi-agent dashboard</span></div>
+    <div class="meta">
+      task: <b id="meta-task">—</b> &nbsp;·&nbsp;
+      runtime <b id="meta-runtime">00:00</b> &nbsp;·&nbsp;
+      tokens <b id="meta-tokens">0</b>
+      &nbsp;·&nbsp;
+      <a href="#" id="open-settings" style="color:var(--accent);text-decoration:none;">⚙ models</a>
+    </div>
+  </div>
+
+  <div class="taskbar">
+    <input id="task-input" type="text" placeholder='Describe a task — or hold SPACE to talk' />
+    <button id="snap-btn" title="Drag a region to attach. Works globally with Ctrl+Shift+H even when Hive isn't focused.">📸 Snap</button>
+    <button id="watch-btn" title="Watch the screen — latest frame auto-attaches to every task you fire (Ctrl+Shift+W).">👁 Watch</button>
+    <button id="mic-btn" title="Hold SPACE or click and hold to talk">🎤 Talk</button>
+    <button id="task-run">Run</button>
+  </div>
+  <div id="attach-row" style="display:none;align-items:center;gap:8px;font-size:11px;color:var(--muted);margin-top:-4px;">
+    <img id="attach-thumb" style="height:48px;border:1px solid var(--border-strong);border-radius:3px;" />
+    <span id="attach-info"></span>
+    <a href="#" id="attach-clear" style="color:var(--error);text-decoration:none;">✕ remove</a>
+  </div>
+  <div id="mic-status" style="font-size:11px;color:var(--muted);margin-top:-6px;min-height:14px;"></div>
+
+  <svg id="power-svg" xmlns="http://www.w3.org/2000/svg"></svg>
+  <div class="grid" id="grid"></div>
+
+  <div id="drawer" class="drawer collapsed">
+    <div class="drawer-tabs">
+      <button class="dtab active" data-tab="activity">📋 Activity</button>
+      <button class="dtab" data-tab="preview">🌐 Preview</button>
+      <span class="drawer-spacer"></span>
+      <select id="preview-source" style="display:none;background:var(--panel);border:1px solid var(--border-strong);color:var(--text);font-family:inherit;padding:3px 6px;border-radius:3px;font-size:11px;"></select>
+      <a href="#" id="preview-popout" style="display:none;color:var(--accent);text-decoration:none;font-size:11px;margin-right:10px;">↗ pop out</a>
+      <a href="#" id="cancel-all-link" style="color:var(--error);text-decoration:none;font-size:11px;margin-right:10px;">⏹ stop all</a>
+      <a href="#" id="drawer-toggle" style="color:var(--accent);text-decoration:none;font-size:11px;">▲ expand</a>
+    </div>
+    <div class="drawer-body">
+      <div id="activity-pane" class="dpane active"></div>
+      <div id="preview-pane" class="dpane"><iframe id="preview-frame" sandbox="allow-same-origin"></iframe></div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <div class="keys">
+      <span><kbd>Enter</kbd> run task</span>
+      <span><kbd>1</kbd>–<kbd>8</kbd> focus worker</span>
+      <span><kbd>M</kbd> focus manager</span>
+      <span><kbd>Esc</kbd> unfocus</span>
+    </div>
+    <div class="badge" id="live-badge">● ready</div>
+  </div>
+
+  <div id="settings-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:10;align-items:center;justify-content:center;">
+    <div style="background:var(--panel);border:1px solid var(--border-strong);border-radius:8px;padding:20px;min-width:520px;max-height:80vh;overflow:auto;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+        <strong style="color:var(--accent);letter-spacing:1px;">MODEL SETTINGS</strong>
+        <a href="#" id="close-settings" style="color:var(--muted);text-decoration:none;">✕</a>
+      </div>
+      <div id="settings-rows"></div>
+      <div style="margin-top:14px;display:flex;justify-content:flex-end;gap:8px;">
+        <button id="settings-save" style="background:var(--accent);border:none;color:#00171f;font-weight:700;padding:6px 14px;border-radius:4px;cursor:pointer;font-family:inherit;">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
