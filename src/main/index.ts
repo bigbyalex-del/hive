@@ -9,6 +9,7 @@ import { transcribeAudio } from './voice';
 import { captureScreen, snipRegion } from './screenshot';
 import { speak } from './tts';
 import { loadDefaultMcpServers, shutdownAllMcp } from './mcp';
+import { initDb, shutdownDb } from './db';
 
 dotenv.config({ path: path.join(__dirname, '..', '..', '.env') });
 
@@ -107,10 +108,14 @@ function createWindow() {
   });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   if (!process.env.ANTHROPIC_API_KEY) {
     console.error('[hive] ANTHROPIC_API_KEY missing — copy .env.example to .env and fill it in.');
   }
+
+  // Bring up the persistent state store before the orchestrator inits, so it
+  // can restore Manager's dispatch history from disk.
+  try { await initDb(); } catch (err) { console.error('[hive] db init failed:', err); }
 
   createWindow();
 
@@ -241,10 +246,12 @@ app.on('window-all-closed', () => {
   globalShortcut.unregisterAll();
   orchestrator?.shutdown();
   shutdownAllMcp().catch(() => { /* ignore */ });
+  shutdownDb();
   if (process.platform !== 'darwin') app.quit();
 });
 
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
   shutdownAllMcp().catch(() => { /* ignore */ });
+  shutdownDb();
 });

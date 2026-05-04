@@ -1,6 +1,7 @@
 import { AgentEvent, AgentSnapshot, DashboardSnapshot, AgentStatus, AgentRole } from '../shared/types';
 import { Manager, DispatchRecord } from './manager';
 import { Worker } from './worker';
+import { recordDispatch, loadRecentDispatches } from './db';
 
 const WORKER_COUNT = 8;
 
@@ -29,6 +30,18 @@ export class Orchestrator {
       const worker = new Worker(id, onEvent);
       this.workers.push(worker);
       this.agents.set(id, this.makeSnapshot(id, 'coder'));
+    }
+
+    // Restore Manager's chat memory from disk so "what have we built?" survives restart.
+    try {
+      const recent = loadRecentDispatches(20);
+      this.dispatchHistory = recent.map(r => ({
+        userInput: r.userInput,
+        subtasks: r.subtasks,
+        timestamp: r.timestamp,
+      }));
+    } catch (err) {
+      console.warn('[hive] failed to load dispatch history:', err);
     }
   }
 
@@ -107,12 +120,15 @@ export class Orchestrator {
       if (subtasks.length === 0) return { ok: true };
 
       // Record the dispatch so Manager can answer "what have we built" later.
+      // Persisted to SQLite so memory survives restart.
+      const dispatchPayload = subtasks.map(s => ({ task: s.task, model: s.model }));
       this.dispatchHistory.push({
         userInput: task,
-        subtasks: subtasks.map(s => ({ task: s.task, model: s.model })),
+        subtasks: dispatchPayload,
         timestamp: Date.now(),
       });
       if (this.dispatchHistory.length > 20) this.dispatchHistory.shift();
+      try { recordDispatch(task, dispatchPayload); } catch (err) { console.warn('[hive] dispatch persist failed:', err); }
 
       // Fan-out is fire-and-forget. Workers run in the background, emitting
       // events as they go. We DO NOT await them here, so runTask returns
