@@ -6,6 +6,63 @@ Started 2026-05-04. Owner: Alex.
 
 ---
 
+## 🌅 Next Session — pick up here
+
+**Verify first:** open Hive, ask *"what was the last thing we did?"* — Manager should pull from SQLite and remember tonight. Confirms persistence still works after sleep.
+
+**Then ship in priority order:**
+
+1. **Specialized roles + exclusive file ownership** (~5 hr fresh-brain work)
+   - Add system prompts for **Coordinator** (=current Manager), **Scout** (codebase mapper), **Builder** (= current Worker), **Reviewer** (quality gate)
+   - When Coordinator fans out, it explicitly assigns each file path to ONE Builder
+   - Other workers can Read but not Write to claimed files
+   - After all Builders finish, Coordinator dispatches Reviewer to typecheck/lint/sanity-check the diff
+   - Fixes the actual bug from 2026-05-04 site build (multiple workers rewriting styles.css)
+   - Matches BridgeMind's "0 merge conflicts by design" pitch
+
+2. **Codebase RAG on fxv-performance** (~3-4 hr)
+   - Embed every file in the FXV repo (use `@xenova/transformers` for local embeddings, free)
+   - Vector store in same SQLite DB (sqlite-vss extension OR a flat float32 file for v1)
+   - Add `Search` built-in tool: query → top-10 file chunks
+   - Workers query before writing: "where is X handled in the codebase?"
+   - Solves "agent doesn't know our code"
+
+3. **Live FXV device push** (~2-3 hr)
+   - Bypass `eas update` for OTA-eligible JS-only changes
+   - Push bundle from Hive directly to iPhone over LAN (Expo dev tools websocket)
+   - 60s wait → 2s reload. Saves ~30-60 min/day on FXV iteration.
+
+4. **Goal queue + scheduler** (~1 day) — foundation for autonomous-colleague mode
+   - `goals` table in SQLite: pending / running / done
+   - cron expressions or simple intervals
+   - Hive can dispatch tasks at scheduled times even when window is minimised
+   - Foundation for later: self-healing, nightly recap, persona testing
+
+**Tonight's commits — all on GitHub at https://github.com/bigbyalex-del/hive (main):**
+
+| | Commit | Added |
+|---|---|---|
+| 1 | `a46a0cd` | v0.3 — Run sandbox (allowlist + child_process + audit) |
+| 2 | `cbf5abe` | v0.4 — MCP support (filesystem server, tool wrapping) |
+| 3 | `bb6f1a1` | Web Fetch via MCP (replaced — Python-only) |
+| 4 | `88144ac` | v0.5 — Native Fetch tool (https + domain allowlist) |
+| 5 | `78b91a6` | v0.6 — SQLite persistence (sql.js, Manager memory) |
+| 6 | `caf06ad` | sql.js locateFile fix |
+
+**Key state of Hive as of 2026-05-04 EOD:**
+- Voice in/out + screenshot snip + watch mode
+- Manager-non-blocking, picks model per subtask, chat memory survives restart
+- Workers: Read/Write/Edit/Glob/Grep + sandboxed Run + native Fetch + MCP filesystem (14 tools)
+- 7 commits backed up on GitHub `bigbyalex-del/hive` (Public)
+
+**Known limitations to flag tomorrow:**
+- No cost cap per run yet (could runaway in autonomous mode)
+- No specialised roles yet (workers are generalists, hence shared-CSS class of bug)
+- MCP fs rooted at `worktrees/` only — workers can't update project root NOTES.md (which is why I (Claude Code) had to write this section directly)
+- No git-per-worktree yet — all workers share the same dir
+
+---
+
 ## 1. One-liner
 
 **"Talk to a manager. Watch eight agents build."**
