@@ -201,8 +201,10 @@ function fileTools(cwd: string): ToolDef[] {
           host === '0.0.0.0'
         ) throw new Error('cannot fetch private/loopback hosts');
 
-        // Domain allowlist for now — keeps blast radius small.
+        // Domain allowlist — keeps blast radius small. Covers code docs +
+        // common research / academic publishers + reputable knowledge sources.
         const allowed = [
+          // Code / dev docs
           'github.com', 'raw.githubusercontent.com', 'gist.githubusercontent.com',
           'npmjs.com', 'www.npmjs.com', 'registry.npmjs.org',
           'developer.mozilla.org', 'mdn.io',
@@ -211,6 +213,24 @@ function fileTools(cwd: string): ToolDef[] {
           'stackoverflow.com', 'dev.to',
           'jsr.io', 'unpkg.com', 'cdn.jsdelivr.net',
           'docs.deno.com', 'nodejs.org',
+          'developer.apple.com', 'developer.android.com',
+          'docs.expo.dev', 'expo.dev',
+
+          // Research / academic
+          'pubmed.ncbi.nlm.nih.gov', 'ncbi.nlm.nih.gov', 'pmc.ncbi.nlm.nih.gov',
+          'doi.org', 'dx.doi.org',
+          'frontiersin.org', 'www.frontiersin.org',
+          'sciencedirect.com', 'www.sciencedirect.com',
+          'journals.lww.com', 'journals.physiology.org', 'journals.humankinetics.com',
+          'biomedcentral.com', 'springeropen.com', 'mdpi.com', 'plos.org',
+          'arxiv.org', 'biorxiv.org', 'medrxiv.org',
+          'tandfonline.com', 'wiley.com', 'onlinelibrary.wiley.com',
+          'nature.com', 'www.nature.com', 'cell.com',
+          'bjsm.bmj.com', 'bmj.com',
+          'scholar.google.com',
+
+          // Reference / knowledge
+          'en.wikipedia.org', 'wikipedia.org',
         ];
         if (!allowed.some(d => host === d || host.endsWith('.' + d))) {
           throw new Error(`domain '${host}' not in allowlist. Allowed: ${allowed.slice(0, 6).join(', ')}, ...`);
