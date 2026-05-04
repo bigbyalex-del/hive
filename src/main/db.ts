@@ -30,12 +30,17 @@ export async function initDb(): Promise<void> {
   if (db) return;
   const initSqlJs = (await dynamicImport('sql.js')).default ?? (await dynamicImport('sql.js'));
   const SQL = await initSqlJs({
-    // Resolve the wasm next to the JS file.
-    locateFile: (file: string) => path.join(
-      path.dirname(require.resolve('sql.js/package.json')),
-      'dist',
-      file,
-    ),
+    // sql.js blocks require.resolve on its package.json, so we resolve via
+    // its main entry then derive the dist dir from there.
+    locateFile: (file: string) => {
+      try {
+        const entry = require.resolve('sql.js');
+        return path.join(path.dirname(entry), file);
+      } catch {
+        // Fallback: assume node_modules layout next to the project.
+        return path.join(process.cwd(), 'node_modules', 'sql.js', 'dist', file);
+      }
+    },
   });
 
   const file = getDbPath();
