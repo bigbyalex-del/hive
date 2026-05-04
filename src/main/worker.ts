@@ -28,7 +28,10 @@ function resolveModelAlias(alias: string, provider: ProviderName): string {
 
 const SYSTEM = `You are a Worker in HIVE, a multi-agent app-building system.
 
-You have these built-in tools: Read, Write, Edit, Glob, Grep, Run.
+You have these built-in tools: Read, Write, Edit, Glob, Grep, Run, Fetch.
+
+## Fetch (web docs)
+Use Fetch to read public documentation before writing code (npm READMEs, MDN, GitHub raw files, Anthropic/OpenAI docs, Stack Overflow). Allowlisted to safe domains. https only. ALWAYS prefer reading actual docs over guessing API shapes.
 
 You may also see additional tools prefixed with \`mcp_<server>_\` — these come from connected MCP (Model Context Protocol) servers and give you access to external systems (filesystems beyond your worktree, databases, APIs, etc). Use them naturally when relevant — they work the same way as built-in tools.
 

@@ -174,6 +174,71 @@ function fileTools(cwd: string): ToolDef[] {
       },
     },
     {
+      name: 'Fetch',
+      description: 'HTTP GET a URL and return the response body (truncated to 32KB). Allowed: docs/code on github, githubusercontent, npmjs.com, mdn-docs, dev.to, stackoverflow, anthropic.com, openai.com docs. Denied: localhost/private IPs/file:// schemes. Use for reading documentation before writing code.',
+      schema: {
+        type: 'object',
+        properties: {
+          url: { type: 'string', description: 'absolute https:// URL' },
+        },
+        required: ['url'],
+      },
+      run: async ({ url }) => {
+        if (typeof url !== 'string') throw new Error('Fetch needs a string url');
+        const u = url.trim();
+        if (!/^https:\/\//.test(u)) throw new Error('only https:// URLs allowed');
+        let parsed: URL;
+        try { parsed = new URL(u); } catch { throw new Error('invalid URL'); }
+        // Block private network ranges + localhost
+        const host = parsed.hostname.toLowerCase();
+        if (
+          host === 'localhost' ||
+          /^127\./.test(host) ||
+          /^10\./.test(host) ||
+          /^192\.168\./.test(host) ||
+          /^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
+          host.endsWith('.local') ||
+          host === '0.0.0.0'
+        ) throw new Error('cannot fetch private/loopback hosts');
+
+        // Domain allowlist for now — keeps blast radius small.
+        const allowed = [
+          'github.com', 'raw.githubusercontent.com', 'gist.githubusercontent.com',
+          'npmjs.com', 'www.npmjs.com', 'registry.npmjs.org',
+          'developer.mozilla.org', 'mdn.io',
+          'docs.anthropic.com', 'www.anthropic.com',
+          'platform.openai.com', 'openai.com',
+          'stackoverflow.com', 'dev.to',
+          'jsr.io', 'unpkg.com', 'cdn.jsdelivr.net',
+          'docs.deno.com', 'nodejs.org',
+        ];
+        if (!allowed.some(d => host === d || host.endsWith('.' + d))) {
+          throw new Error(`domain '${host}' not in allowlist. Allowed: ${allowed.slice(0, 6).join(', ')}, ...`);
+        }
+
+        audit({
+          ts: Date.now(),
+          agent: cwd.split(/[\\/]/).pop() ?? 'unknown',
+          tool: 'Fetch',
+          input: { url: u },
+          decision: 'allow',
+        });
+
+        const ctrl = new AbortController();
+        const timeout = setTimeout(() => ctrl.abort(), 15_000);
+        try {
+          const resp = await fetch(u, { signal: ctrl.signal, redirect: 'follow' });
+          const text = await resp.text();
+          const status = resp.status;
+          const truncated = text.slice(0, 32_000);
+          const note = text.length > 32_000 ? `\n[truncated from ${text.length} bytes]` : '';
+          return `[HTTP ${status}]\n${truncated}${note}`;
+        } finally {
+          clearTimeout(timeout);
+        }
+      },
+    },
+    {
       name: 'Grep',
       description: 'Search for a regex pattern across files in the worktree. Returns file:line:match for each hit, capped at 50 hits.',
       schema: {

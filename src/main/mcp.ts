@@ -119,14 +119,9 @@ export async function loadDefaultMcpServers(): Promise<ToolDef[]> {
       command: 'npx',
       args: ['-y', '@modelcontextprotocol/server-filesystem', path.join(process.cwd(), 'worktrees')],
     },
-    {
-      // Web Fetch — workers gain HTTP GET access (with the server's own
-      // safety defaults around redirects, sizes, etc). Useful for reading
-      // npm READMEs, MDN docs, GitHub raw files before writing code.
-      name: 'fetch',
-      command: 'npx',
-      args: ['-y', '@modelcontextprotocol/server-fetch'],
-    },
+    // Web Fetch is implemented as a native built-in tool below (see
+    // anthropic.ts fileTools). The official MCP fetch server is Python-based
+    // (uvx mcp-server-fetch); not bundling Python for tonight.
   ];
 
   const allTools: ToolDef[] = [];
