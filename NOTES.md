@@ -6,60 +6,100 @@ Started 2026-05-04. Owner: Alex.
 
 ---
 
-## 🌅 Next Session — pick up here
+## 🌅 Next Session — pick up here (2026-05-05)
 
-**Verify first:** open Hive, ask *"what was the last thing we did?"* — Manager should pull from SQLite and remember tonight. Confirms persistence still works after sleep.
+### 0. Verify state still works (2 min)
 
-**Then ship in priority order:**
+```powershell
+hive
+```
 
-1. **Specialized roles + exclusive file ownership** (~5 hr fresh-brain work)
-   - Add system prompts for **Coordinator** (=current Manager), **Scout** (codebase mapper), **Builder** (= current Worker), **Reviewer** (quality gate)
-   - When Coordinator fans out, it explicitly assigns each file path to ONE Builder
-   - Other workers can Read but not Write to claimed files
-   - After all Builders finish, Coordinator dispatches Reviewer to typecheck/lint/sanity-check the diff
-   - Fixes the actual bug from 2026-05-04 site build (multiple workers rewriting styles.css)
-   - Matches BridgeMind's "0 merge conflicts by design" pitch
+Ask Manager: *"what was the last thing we did?"* — should pull from SQLite. If yes, persistence intact.
 
-2. **Codebase RAG on fxv-performance** (~3-4 hr)
-   - Embed every file in the FXV repo (use `@xenova/transformers` for local embeddings, free)
-   - Vector store in same SQLite DB (sqlite-vss extension OR a flat float32 file for v1)
-   - Add `Search` built-in tool: query → top-10 file chunks
-   - Workers query before writing: "where is X handled in the codebase?"
-   - Solves "agent doesn't know our code"
+### 1. The blocker list — FXV-safe gate (3 days work)
 
-3. **Live FXV device push** (~2-3 hr)
-   - Bypass `eas update` for OTA-eligible JS-only changes
-   - Push bundle from Hive directly to iPhone over LAN (Expo dev tools websocket)
-   - 60s wait → 2s reload. Saves ~30-60 min/day on FXV iteration.
+**Hive should NOT touch FXV until items 1–4 land.** Greenfield only (`/tmp/...`, demo apps, scratch projects) for now.
 
-4. **Goal queue + scheduler** (~1 day) — foundation for autonomous-colleague mode
-   - `goals` table in SQLite: pending / running / done
-   - cron expressions or simple intervals
-   - Hive can dispatch tasks at scheduled times even when window is minimised
-   - Foundation for later: self-healing, nightly recap, persona testing
+| # | Build | Hours | Why critical |
+|---|---|---|---|
+| 1 | Specialised roles + exclusive file ownership | 5 | Tonight's site-build bug — workers overwrote each other's styles.css. Without file claims, FXV use = silent data loss. |
+| 2 | Real git per worktree (auto init/branch/commit/diff) | 4 | No way to review or rollback worker changes today. Non-negotiable for production code. |
+| 3 | Reviewer role (typecheck/lint/style gate) | 3 | Workers ship direct → no quality control. FXV needs every output verified. |
+| 4 | Cost cap + worker timeout + 429 backoff | done tonight (`f2b3624`) | ✅ Shipped: 5-min worker timeout, expo-backoff on 429s, 5M-token-per-run cap |
+| 5 | Codebase RAG on FXV (vector index) | 4 | Without it workers violate FXV conventions. Useful, not blocking. |
+| 6 | Personal preference memory (port from Claude Code) | 3 | Brand rules auto-injected (no emoji, gradient on data viz only, etc) instead of typed each prompt. |
 
-**Tonight's commits — all on GitHub at https://github.com/bigbyalex-del/hive (main):**
+### 2. The role org-chart — 12 starter roles
 
-| | Commit | Added |
+40 possible roles documented; ship these 12 in this order:
+
+| # | Role | Status | Hours |
+|---|---|---|---|
+| 1 | **Coordinator** (= Manager) | ✅ done | — |
+| 2 | **Builder** (= Worker) | ✅ done | — |
+| 3 | **Scout** — codebase mapper, Read+Glob+Grep only | TODO | 2 |
+| 4 | **Reviewer** — typecheck/lint/style gate, Read+Run+Fetch | TODO | 3 |
+| 5 | **Tester** — writes + runs tests until green | TODO | 2 |
+| 6 | **Spec Interviewer** — 30-90s voice intake before dispatch | TODO | 2 |
+| 7 | **Cost Sentinel** (always-on) — watches spend; basic shipped | partial | 2 |
+| 8 | **Recapper** — nightly: commits + audit → recap file | TODO | 2 |
+| 9 | **Social Media Manager** — drafts FXV/DSA-voiced posts | TODO | 3 |
+| 10 | **Outreach Specialist** — pre-qualified-leads pipeline (designed §15) | TODO | 4 |
+| 11 | **Deployer** — handles OTA/release on command | TODO | 2 |
+| 12 | **Sentry Watcher** (always-on) — triages errors → dispatches fixes | TODO | 4 |
+
+**Roles architecture:** each role = a worker config in `src/main/roles/<name>.ts` with `{systemPrompt, tools, defaultModel, triggers}`. Coordinator picks role *and* model per subtask.
+
+### 3. Recommended first build tomorrow (~7 hr, the BridgeMind playbook)
+
+Ship **Spec Interviewer + Scout + Reviewer** as one cohesive change:
+- Spec Interviewer → unambiguous brief
+- Scout → codebase context before any Build
+- Reviewer → quality gate after every Build
+
+Together they fix tonight's class of bug AND make every run more reliable. After that, layer Tester / Recapper / Social / Outreach over the next sessions.
+
+### 4. The other 28 roles documented (build later, not tomorrow)
+
+Engineering: Refactorer, DevOps, Security Auditor, Performance Auditor, UI Designer, UX Designer, Spec Writer, Product Manager, User Researcher.
+Content: Copywriter, SEO Specialist, Newsletter Writer, Video Scriptwriter, Community Manager.
+Sales: Lead Researcher, Customer Success, Reply Drafter.
+Ops: Health Monitor, Data Analyst, Forecaster.
+Legal: App Store Compliance, GDPR/Privacy, Legal Reviewer, Bookkeeper.
+Personal: Calendar Manager, Email Triage, Research Assistant, Note Synthesizer.
+Strategic: Roadmap Planner, Competitor Watcher, Decision Documenter.
+
+### 5. 2026-05-04 commits on GitHub (`bigbyalex-del/hive` main)
+
+| # | Commit | Added |
 |---|---|---|
 | 1 | `a46a0cd` | v0.3 — Run sandbox (allowlist + child_process + audit) |
 | 2 | `cbf5abe` | v0.4 — MCP support (filesystem server, tool wrapping) |
-| 3 | `bb6f1a1` | Web Fetch via MCP (replaced — Python-only) |
+| 3 | `bb6f1a1` | Web Fetch via MCP attempt (replaced — Python-only) |
 | 4 | `88144ac` | v0.5 — Native Fetch tool (https + domain allowlist) |
 | 5 | `78b91a6` | v0.6 — SQLite persistence (sql.js, Manager memory) |
 | 6 | `caf06ad` | sql.js locateFile fix |
+| 7 | `1a4eabe` | NOTES — first "Next Session" pickup brief |
+| 8 | `665ab93` | Fetch allowlist: research/academic publishers |
+| 9 | `1554877` | Fetch allowlist: + researchgate, europepmc, sage |
+| 10 | `f2b3624` | Safety: worker timeout + 429 backoff + run token cap |
+| 11 | (this commit) | Role inventory + tomorrow's blocker list |
 
-**Key state of Hive as of 2026-05-04 EOD:**
-- Voice in/out + screenshot snip + watch mode
-- Manager-non-blocking, picks model per subtask, chat memory survives restart
-- Workers: Read/Write/Edit/Glob/Grep + sandboxed Run + native Fetch + MCP filesystem (14 tools)
-- 7 commits backed up on GitHub `bigbyalex-del/hive` (Public)
+### 6. Known limitations carried into tomorrow
 
-**Known limitations to flag tomorrow:**
-- No cost cap per run yet (could runaway in autonomous mode)
-- No specialised roles yet (workers are generalists, hence shared-CSS class of bug)
-- MCP fs rooted at `worktrees/` only — workers can't update project root NOTES.md (which is why I (Claude Code) had to write this section directly)
-- No git-per-worktree yet — all workers share the same dir
+- **MCP fs rooted at `worktrees/` only** — workers can't reach project root files (NOTES.md etc). Add a project-files MCP server when needed, locked to specific paths.
+- **Manager occasionally still chats when it should dispatch** — system prompt tightened tonight, watch for regressions.
+- **No retry on Run timeouts** — only on 429s.
+- **Audit log only covers Run + MCP** — Read/Write/Edit not yet logged.
+- **`hive` launcher skips build** — if you edit code and don't see changes, run `hive-build` instead.
+- **Dispatch history is per-run, not per-project** — when multi-project switching ships, namespace by project.
+
+### 7. Launcher commands (reminder)
+
+| Command | Behaviour |
+|---|---|
+| `hive` | instant launch, no rebuild |
+| `hive-build` | rebuild TS first, then launch (use after editing code) |
 
 ---
 
