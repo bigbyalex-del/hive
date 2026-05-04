@@ -342,13 +342,36 @@ export class AnthropicProvider implements Provider {
       if (opts.abortSignal?.aborted) throw new Error('cancelled');
       turns++;
 
-      const resp = await client.messages.create({
-        model,
-        max_tokens: 4096,
-        system: opts.systemPrompt,
-        tools: apiTools.length ? apiTools : undefined,
-        messages,
-      });
+      // Anthropic API call with exponential backoff on 429s.
+      let resp: any = null;
+      let lastErr: any = null;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        try {
+          resp = await client.messages.create({
+            model,
+            max_tokens: 4096,
+            system: opts.systemPrompt,
+            tools: apiTools.length ? apiTools : undefined,
+            messages,
+          });
+          break;
+        } catch (err: any) {
+          lastErr = err;
+          const status = err?.status ?? err?.response?.status;
+          const isRateLimit = status === 429 || /rate.?limit/i.test(String(err?.message ?? ''));
+          if (!isRateLimit || attempt === 4) throw err;
+          // Honour Retry-After when present, else backoff: 4s, 8s, 16s, 32s
+          const retryAfterHeader = err?.headers?.['retry-after'] ?? err?.response?.headers?.['retry-after'];
+          const retryAfter = retryAfterHeader ? parseInt(retryAfterHeader, 10) * 1000 : null;
+          const backoff = retryAfter ?? Math.min(60_000, 4_000 * Math.pow(2, attempt)) + Math.random() * 1_000;
+          events.onError?.(new Error(`rate-limited (attempt ${attempt + 1}/5), backing off ${Math.round(backoff / 1000)}s`));
+          await new Promise<void>((resolve, reject) => {
+            const t = setTimeout(resolve, backoff);
+            opts.abortSignal?.addEventListener('abort', () => { clearTimeout(t); reject(new Error('cancelled')); }, { once: true });
+          });
+        }
+      }
+      if (!resp) throw lastErr ?? new Error('no response');
 
       const turnIn = resp.usage?.input_tokens ?? 0;
       const turnOut = resp.usage?.output_tokens ?? 0;

@@ -78,6 +78,17 @@ export class Worker {
     this.emit({ type: 'task', id: this.id, task: subtask });
     this.emit({ type: 'log', id: this.id, line: '→ starting' });
 
+    // Hard 5-minute timeout per worker. Combines with the parent abort signal.
+    const localCtrl = new AbortController();
+    const timeout = setTimeout(() => {
+      this.emit({ type: 'log', id: this.id, line: '⏱ 5-min timeout — auto-cancelled' });
+      localCtrl.abort();
+    }, 5 * 60 * 1000);
+    if (abortSignal) {
+      abortSignal.addEventListener('abort', () => localCtrl.abort(), { once: true });
+    }
+    const effectiveSignal = localCtrl.signal;
+
     await this.ensureWorktree();
 
     // If user attached a screenshot, drop it into the worktree so the worker
@@ -127,12 +138,14 @@ export class Worker {
         // Bumped from 5 to 12 so workers can write → run tests → see failures
         // → fix code → re-run, all in a single agent loop.
         maxTurns: 12,
-        abortSignal,
+        abortSignal: effectiveSignal,
       } as any, events);
 
+      clearTimeout(timeout);
       this.emit({ type: 'log', id: this.id, line: `✓ ${result.text.slice(0, 80)}` });
       this.emit({ type: 'status', id: this.id, status: 'done' });
     } catch (err: any) {
+      clearTimeout(timeout);
       this.emit({ type: 'log', id: this.id, line: `✗ ${err?.message ?? err}` });
       this.emit({ type: 'status', id: this.id, status: 'error' });
       throw err;

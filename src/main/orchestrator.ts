@@ -18,6 +18,11 @@ export class Orchestrator {
   private managerBusy = false; // only the decompose phase blocks; never the worker phase
   private busyQueue: { task: string; image?: string; resolve: (r: any) => void }[] = [];
   private dispatchHistory: DispatchRecord[] = []; // memory for Manager status questions
+  // Hard cap on tokens consumed per single user-fired run. Default ~5M tokens
+  // (~£10 worst case on Sonnet, much less on Haiku). Configurable later.
+  private readonly RUN_TOKEN_CAP = 5_000_000;
+  private runStartTokens = 0;
+  private runCancelled = false;
 
   constructor(private emit: (evt: AgentEvent) => void) {
     const onEvent = (evt: AgentEvent) => this.handleEvent(evt);
@@ -78,6 +83,13 @@ export class Orchestrator {
       case 'tokens':
         snap.tokens += evt.delta;
         this.totalTokens += evt.delta;
+        // Hard cost cap: kill all in-flight workers if a run exceeds the cap.
+        if (!this.runCancelled && this.totalTokens - this.runStartTokens > this.RUN_TOKEN_CAP) {
+          this.runCancelled = true;
+          const used = this.totalTokens - this.runStartTokens;
+          this.emit({ type: 'log', id: 'M', line: `⛔ token cap hit (${used.toLocaleString()} > ${this.RUN_TOKEN_CAP.toLocaleString()}) — cancelling all workers` });
+          this.cancelAll();
+        }
         break;
       case 'role':
         snap.role = evt.role;
@@ -103,6 +115,9 @@ export class Orchestrator {
     this.currentTask = task;
     this.startedAt = Date.now();
     this.managerBusy = true;
+    // Reset run-scope cost tracking.
+    this.runStartTokens = this.totalTokens;
+    this.runCancelled = false;
 
     try {
       const result = await this.manager.decompose(task, this.dispatchHistory);
