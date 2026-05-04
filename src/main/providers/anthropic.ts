@@ -228,6 +228,10 @@ function fileTools(cwd: string): ToolDef[] {
           'nature.com', 'www.nature.com', 'cell.com',
           'bjsm.bmj.com', 'bmj.com',
           'scholar.google.com',
+          'researchgate.net', 'www.researchgate.net',
+          'europepmc.org', 'www.europepmc.org',
+          'sportrxiv.org', 'osf.io',
+          'pubs.aaai.org', 'acsm.org', 'journals.sagepub.com',
 
           // Reference / knowledge
           'en.wikipedia.org', 'wikipedia.org',
