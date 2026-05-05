@@ -331,9 +331,87 @@ const taskInput = document.getElementById('task-input');
 const taskRun = document.getElementById('task-run');
 const liveBadge = document.getElementById('live-badge');
 
+// ---- spec interview state ----
+let specMode = false;
+let specPendingTask = null;     // original raw task waiting on answers
+const specBtn = document.getElementById('spec-btn');
+const specPanel = document.getElementById('spec-panel');
+const specQuestionsDiv = document.getElementById('spec-questions');
+
+specBtn.addEventListener('click', () => {
+  specMode = !specMode;
+  specBtn.style.background = specMode ? 'var(--accent)' : '';
+  specBtn.style.color = specMode ? '#00171f' : '';
+  if (!specMode) {
+    specPendingTask = null;
+    specPanel.style.display = 'none';
+    specQuestionsDiv.innerHTML = '';
+  }
+});
+
+function renderSpecQuestions(questions) {
+  specQuestionsDiv.innerHTML = questions.map((q, i) => `
+    <div>
+      <div style="font-size:11px;color:var(--accent);margin-bottom:3px;">Q${i + 1}. ${q}</div>
+      <input type="text" data-spec-q="${i}" placeholder="answer (or leave blank)" style="width:100%;background:var(--panel);border:1px solid var(--border-strong);color:var(--text);padding:5px 8px;border-radius:3px;font-family:inherit;font-size:12px;" />
+    </div>
+  `).join('');
+  specPanel.style.display = 'block';
+  // Focus first answer field for fast typing.
+  const first = specQuestionsDiv.querySelector('input[data-spec-q]');
+  if (first) first.focus();
+}
+
+function buildEnrichedTask(originalTask, questions) {
+  const lines = [originalTask, '', '## Clarifications'];
+  for (let i = 0; i < questions.length; i++) {
+    const ans = (specQuestionsDiv.querySelector(`input[data-spec-q="${i}"]`)?.value || '(no preference)').trim();
+    lines.push(`Q: ${questions[i]}`);
+    lines.push(`A: ${ans}`);
+  }
+  return lines.join('\n');
+}
+
 async function runTask() {
+  // Spec mode, second click — collect answers and dispatch enriched task.
+  if (specPendingTask && specPanel.style.display === 'block') {
+    const enriched = buildEnrichedTask(specPendingTask.task, specPendingTask.questions);
+    specPendingTask = null;
+    specPanel.style.display = 'none';
+    specQuestionsDiv.innerHTML = '';
+    document.getElementById('meta-task').textContent = enriched.slice(0, 50) + '…';
+    liveBadge.textContent = '● running';
+    startRuntime();
+    const imgUrl = attachedImage;
+    micStatus.textContent = '🐝 Manager is thinking…';
+    try {
+      const res = await window.hive.runTask(enriched, imgUrl);
+      if (!res.ok) appendLog('M', '✗ ' + res.error);
+      micStatus.textContent = '';
+    } finally {
+      clearAttachment();
+    }
+    return;
+  }
+
   const task = taskInput.value.trim();
   if (!task) return;
+
+  // Spec mode, first click — fire interview, render questions, wait for next click.
+  if (specMode) {
+    micStatus.textContent = '📋 spec interview…';
+    taskInput.value = '';
+    const res = await window.hive.runSpecInterview(task);
+    micStatus.textContent = '';
+    if (res.ok && res.questions && res.questions.length > 0) {
+      specPendingTask = { task, questions: res.questions };
+      renderSpecQuestions(res.questions);
+      return;
+    }
+    // No questions came back — fall through to normal dispatch with the raw task.
+    taskInput.value = task;
+  }
+
   document.getElementById('meta-task').textContent = task.slice(0, 50) + (task.length > 50 ? '…' : '');
   liveBadge.textContent = '● running';
   startRuntime();

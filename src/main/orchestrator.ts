@@ -1,13 +1,19 @@
 import { AgentEvent, AgentSnapshot, DashboardSnapshot, AgentStatus, AgentRole } from '../shared/types';
 import { Manager, DispatchRecord } from './manager';
 import { Worker } from './worker';
+import { Reviewer } from './reviewer';
 import { recordDispatch, loadRecentDispatches } from './db';
+import * as path from 'path';
 
 const WORKER_COUNT = 8;
 
 export class Orchestrator {
   private manager: Manager;
   private workers: Worker[] = [];
+  private reviewer: Reviewer;
+  // When false, skip the Reviewer pass (e.g. trivial tasks). Default on so the
+  // peer-review safety net runs without explicit opt-in.
+  private reviewEnabled = true;
   private agents = new Map<string, AgentSnapshot>();
   private currentTask: string | null = null;
   private startedAt = 0;
@@ -18,6 +24,7 @@ export class Orchestrator {
   private managerBusy = false; // only the decompose phase blocks; never the worker phase
   private busyQueue: { task: string; image?: string; resolve: (r: any) => void }[] = [];
   private dispatchHistory: DispatchRecord[] = []; // memory for Manager status questions
+  private rawSubscribers: Array<(evt: AgentEvent) => void> = [];
   // Hard cap on tokens consumed per single user-fired run. Default ~5M tokens
   // (~£10 worst case on Sonnet, much less on Haiku). Configurable later.
   private readonly RUN_TOKEN_CAP = 5_000_000;
@@ -29,6 +36,8 @@ export class Orchestrator {
 
     this.manager = new Manager('M', onEvent);
     this.agents.set('M', this.makeSnapshot('M', 'manager'));
+
+    this.reviewer = new Reviewer('R', onEvent);
 
     for (let i = 1; i <= WORKER_COUNT; i++) {
       const id = `W${i}`;
@@ -63,7 +72,20 @@ export class Orchestrator {
     };
   }
 
+  private subscribeRaw(fn: (evt: AgentEvent) => void): () => void {
+    this.rawSubscribers.push(fn);
+    return () => {
+      const i = this.rawSubscribers.indexOf(fn);
+      if (i >= 0) this.rawSubscribers.splice(i, 1);
+    };
+  }
+
   private handleEvent(evt: AgentEvent) {
+    // Fan out to any raw subscribers FIRST so they see all events including
+    // ones for unknown agent ids (e.g. the Reviewer 'R' if it ever emits).
+    for (const sub of this.rawSubscribers) {
+      try { sub(evt); } catch { /* sub failures must not break the orchestrator */ }
+    }
     const snap = this.agents.get(evt.id);
     if (!snap) return;
 
@@ -158,12 +180,41 @@ export class Orchestrator {
         const ctrl = new AbortController();
         this.inFlight.set(worker.id, ctrl);
 
+        let workerSucceeded = false;
+        let workerSummary = '';
+        const captureSummary = (evt: AgentEvent) => {
+          // Worker.execute logs `✓ <summary>` on success — capture it for the
+          // Reviewer prompt. Last such line wins.
+          if (evt.id === worker.id && evt.type === 'log' && evt.line.startsWith('✓ ')) {
+            workerSummary = evt.line.replace(/^✓\s*/, '');
+            workerSucceeded = true;
+          }
+        };
+        // Hook the orchestrator's own emit briefly. Cheaper than threading a
+        // result back through Worker.execute.
+        const wrappedHandler = (evt: AgentEvent) => { captureSummary(evt); };
+        const unsubscribe = this.subscribeRaw(wrappedHandler);
+
         worker.execute(subtask.task, imageDataUrl, subtask.model, ctrl.signal)
           .catch(err => {
             this.emit({ type: 'log', id: worker.id, line: `✗ ${err?.message ?? err}` });
           })
-          .finally(() => {
+          .finally(async () => {
             this.inFlight.delete(worker.id);
+            unsubscribe();
+            if (workerSucceeded && this.reviewEnabled && !this.runCancelled) {
+              try {
+                const worktreePath = path.join(process.cwd(), 'worktrees', `wt-${worker.id.slice(1)}`);
+                await this.reviewer.review({
+                  workerId: worker.id,
+                  worktreePath,
+                  originalTask: subtask.task,
+                  workerSummary,
+                });
+              } catch (err: any) {
+                this.emit({ type: 'log', id: worker.id, line: `🔍 review error: ${err?.message ?? err}` });
+              }
+            }
           });
       });
 
@@ -180,6 +231,20 @@ export class Orchestrator {
     if (!next) return;
     // Fire-and-forget the queued task; resolve its promise when it returns.
     this._runOnce(next.task, next.image).then(next.resolve);
+  }
+
+  // Spec Interview entrypoint — bypasses the dispatch flow. Returns 0-4
+  // clarification questions the renderer renders inline; the user fills them
+  // in then fires runTask with the enriched prompt.
+  async runSpecInterview(task: string): Promise<string[]> {
+    if (this.managerBusy) return []; // busy → skip rather than queue
+    this.managerBusy = true;
+    try {
+      return await this.manager.interview(task);
+    } finally {
+      this.managerBusy = false;
+      this.flushBusyQueue();
+    }
   }
 
   cancelWorker(id: string): boolean {

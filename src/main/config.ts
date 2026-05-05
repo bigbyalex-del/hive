@@ -8,21 +8,22 @@ import { ProviderConfig } from './providers/types';
 export type ModelConfig = Record<string, ProviderConfig>; // keyed by agent id (M, W1..W8)
 
 const DEFAULTS: ModelConfig = {
-  // Manager defaults to Sonnet 4.6 — routing/decomposition is well within
-  // Sonnet's range and it responds 2-3x faster than Opus, which makes voice
-  // chat snappy. User can promote to Opus via ⚙ panel for hard tasks.
+  // Role-tiered defaults (v0.6): Manager handles routing only — Sonnet is plenty
+  // and stays snappy for voice chat. W1 is the "primary coder" — Sonnet for
+  // multi-step reasoning across files. W2-W7 are fan-out workers tackling
+  // pattern-work in parallel — Haiku for 5x cheaper, 3x faster turns. W8 is
+  // earmarked for the Reviewer pass (v0.7) — Haiku is enough for diff review.
+  // Users override per-agent via the ⚙ models panel.
   M:  { provider: 'anthropic', model: 'claude-sonnet-4-6' },
-  // Haiku 4.5 is 3-5x faster + ~5x cheaper than Sonnet for the bulk of tasks
-  // (HTML/CSS pages, file edits, simple refactors). User can swap individual
-  // workers to Sonnet via the ⚙ models panel for harder work.
   W1: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
-  W2: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
-  W3: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
-  W4: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
-  W5: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
-  W6: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
-  W7: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
-  W8: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+  W2: { provider: 'anthropic', model: 'claude-haiku-4-5-20251001' },
+  W3: { provider: 'anthropic', model: 'claude-haiku-4-5-20251001' },
+  W4: { provider: 'anthropic', model: 'claude-haiku-4-5-20251001' },
+  W5: { provider: 'anthropic', model: 'claude-haiku-4-5-20251001' },
+  W6: { provider: 'anthropic', model: 'claude-haiku-4-5-20251001' },
+  W7: { provider: 'anthropic', model: 'claude-haiku-4-5-20251001' },
+  W8: { provider: 'anthropic', model: 'claude-haiku-4-5-20251001' },
+  R:  { provider: 'anthropic', model: 'claude-haiku-4-5-20251001' }, // Reviewer (v0.7+)
 };
 
 let cached: ModelConfig | null = null;

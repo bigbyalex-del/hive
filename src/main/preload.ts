@@ -28,6 +28,7 @@ const IPC = {
   ManagerSpoke: 'hive:manager-spoke',
   ListTemplates: 'hive:list-templates',
   ScaffoldTemplate: 'hive:scaffold-template',
+  RunSpecInterview: 'hive:run-spec-interview',
 };
 
 contextBridge.exposeInMainWorld('hive', {
@@ -62,6 +63,7 @@ contextBridge.exposeInMainWorld('hive', {
   listTemplates: () => ipcRenderer.invoke(IPC.ListTemplates),
   scaffoldTemplate: (workerId: string, templateName: string, projectName: string) =>
     ipcRenderer.invoke(IPC.ScaffoldTemplate, { workerId, templateName, projectName }),
+  runSpecInterview: (task: string) => ipcRenderer.invoke(IPC.RunSpecInterview, task),
   onAgentEvent: (cb: (evt: any) => void) => {
     const listener = (_: Electron.IpcRendererEvent, evt: any) => cb(evt);
     ipcRenderer.on(IPC.AgentEvent, listener);

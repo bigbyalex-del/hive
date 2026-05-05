@@ -229,6 +229,15 @@ app.whenReady().then(async () => {
     }
   });
   if (!hotkeyOk) console.warn('[hive] failed to register Ctrl+Shift+H global hotkey');
+  ipcMain.handle(IPC.RunSpecInterview, async (_e, task: string) => {
+    if (!orchestrator) return { ok: false, questions: [] };
+    try {
+      const questions = await orchestrator.runSpecInterview(task);
+      return { ok: true, questions };
+    } catch (err: any) {
+      return { ok: false, questions: [], error: err?.message ?? String(err) };
+    }
+  });
   ipcMain.handle(IPC.ListTemplates, () => listTemplates());
   ipcMain.handle(IPC.ScaffoldTemplate, async (_e, payload: { workerId: string; templateName: string; projectName: string }) => {
     try {

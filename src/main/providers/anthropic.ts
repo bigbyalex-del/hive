@@ -437,11 +437,20 @@ export class AnthropicProvider implements Provider {
       let lastErr: any = null;
       for (let attempt = 0; attempt < 5; attempt++) {
         try {
+          // Send the system prompt as a content block with ephemeral cache_control
+          // so subsequent turns in this run hit the prompt cache (50% read cost,
+          // ~5min TTL). Tools array is also stable across turns — same benefit.
           resp = await client.messages.create({
             model,
             max_tokens: 4096,
-            system: opts.systemPrompt,
-            tools: apiTools.length ? apiTools : undefined,
+            system: opts.systemPrompt
+              ? [{ type: 'text', text: opts.systemPrompt, cache_control: { type: 'ephemeral' } }]
+              : undefined,
+            tools: apiTools.length
+              ? apiTools.map((t, i) => i === apiTools.length - 1
+                  ? { ...t, cache_control: { type: 'ephemeral' } }
+                  : t)
+              : undefined,
             messages,
           });
           break;

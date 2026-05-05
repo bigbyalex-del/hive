@@ -140,4 +140,58 @@ export class Manager {
       throw err;
     }
   }
+
+  // Spec Interview — given a raw task, return 2-4 sharp clarification questions
+  // the user must answer before dispatch. Reduces off-piste output by forcing
+  // the user to commit to acceptance criteria up front.
+  async interview(task: string): Promise<string[]> {
+    this.emit({ type: 'status', id: this.id, status: 'working' });
+    this.emit({ type: 'log', id: this.id, line: '📋 spec interview…' });
+
+    const cfg = getAgentConfig(this.id);
+    const provider = getProvider(cfg.provider);
+
+    const INTERVIEW_SYSTEM = `You are the Spec Interviewer in HIVE. The user wants to build something. Your job: output 2-4 SHARP questions whose answers would prevent the most likely off-piste output. Focus on:
+- Scope / "done means what" (one screen vs many, with auth vs no, real data vs mocked)
+- Visual style or framework choice IF it isn't implied
+- Inputs / data shape / target platform
+- Edge cases the user has clearly forgotten
+
+Skip questions whose answers are obvious from context. Skip nice-to-have polish questions. The questions must be answerable in one short sentence each.
+
+Reply with ONLY a JSON array of strings. No preamble, no markdown, no trailing text. Example: ["What framework — vanilla HTML or React?","Is this a single page or multiple?","Should it persist data, and where?"]
+
+If the task is already specified clearly enough that no questions are needed, return an empty array \`[]\` and the dispatcher will skip the interview.`;
+
+    try {
+      const result = await provider.run(cfg.model, {
+        systemPrompt: INTERVIEW_SYSTEM,
+        prompt: task,
+        maxTurns: 1,
+        noTools: true,
+      } as any, {
+        onError: (err: Error) => this.emit({ type: 'log', id: this.id, line: `✗ ${err.message}` }),
+        _tokenDelta: (delta: number) => this.emit({ type: 'tokens', id: this.id, delta }),
+      } as any);
+
+      const raw = result.text.trim();
+      this.emit({ type: 'status', id: this.id, status: 'done' });
+
+      const cleaned = raw.startsWith('```') ? raw.replace(/^```(?:json)?|```$/g, '').trim() : raw;
+      try {
+        const arr = JSON.parse(cleaned);
+        if (Array.isArray(arr)) {
+          const questions = arr.filter(s => typeof s === 'string' && s.trim().length > 0).slice(0, 4);
+          this.emit({ type: 'log', id: this.id, line: `📋 ${questions.length} question${questions.length === 1 ? '' : 's'}` });
+          return questions;
+        }
+      } catch { /* fall through */ }
+      this.emit({ type: 'log', id: this.id, line: '⚠ interview returned non-JSON, skipping spec' });
+      return [];
+    } catch (err: any) {
+      this.emit({ type: 'log', id: this.id, line: `✗ interview: ${err?.message ?? err}` });
+      this.emit({ type: 'status', id: this.id, status: 'error' });
+      return [];
+    }
+  }
 }

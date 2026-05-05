@@ -44,8 +44,15 @@
     <input id="task-input" type="text" placeholder='Describe a task — or hold SPACE to talk' />
     <button id="snap-btn" title="Drag a region to attach. Works globally with Ctrl+Shift+H even when Hive isn't focused.">📸 Snap</button>
     <button id="watch-btn" title="Watch the screen — latest frame auto-attaches to every task you fire (Ctrl+Shift+W).">👁 Watch</button>
+    <button id="spec-btn" title="Spec Interview — Manager asks 2-4 clarification questions before dispatching, kills off-piste output.">📋 Spec</button>
     <button id="mic-btn" title="Hold SPACE or click and hold to talk">🎤 Talk</button>
     <button id="task-run">Run</button>
+  </div>
+
+  <div id="spec-panel" style="display:none;background:rgba(0,42,58,0.4);border:1px solid var(--border-strong);border-radius:6px;padding:12px;margin-top:6px;">
+    <div style="font-size:11px;color:var(--accent);letter-spacing:1px;margin-bottom:8px;">📋 SPEC — answer briefly, then click Run again</div>
+    <div id="spec-questions" style="display:flex;flex-direction:column;gap:8px;"></div>
+    <div style="font-size:10px;color:var(--muted);margin-top:8px;">Tip: leave blank to use defaults; questions you skip are sent unanswered.</div>
   </div>
   <div id="attach-row" style="display:none;align-items:center;gap:8px;font-size:11px;color:var(--muted);margin-top:-4px;">
     <img id="attach-thumb" style="height:48px;border:1px solid var(--border-strong);border-radius:3px;" />
