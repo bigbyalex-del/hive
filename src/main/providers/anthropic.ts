@@ -12,6 +12,7 @@ import { spawn } from 'child_process';
 import { Provider, RunOptions, RunResult, RunEvents, ToolDef } from './types';
 import { validateCommand, audit } from '../runtime';
 import { getMcpToolsForWorker } from '../mcp';
+import { runBrowserTest } from '../browserTest';
 
 const dynamicImport = new Function('m', 'return import(m)') as (m: string) => Promise<any>;
 
@@ -317,6 +318,40 @@ function fileTools(cwd: string): ToolDef[] {
         }
         try { await walk(cwd); } catch { /* empty */ }
         return out.length ? out.join('\n') : '(no matches)';
+      },
+    },
+    {
+      name: 'BrowserTest',
+      description: 'Load an HTML file in a hidden Chromium window, optionally run a JS assertion in page context, and save a PNG screenshot to the worktree. Use AFTER writing UI to verify it actually works before reporting done. The assertion runs as the body of an async function — return truthy to pass, falsy or throw to fail. Examples: `return document.title === "Hello"` or `return document.querySelectorAll(".card").length === 4`. Returns PASS/FAIL plus screenshot filename plus first 5 console messages.',
+      schema: {
+        type: 'object',
+        properties: {
+          htmlPath: { type: 'string', description: 'relative path to .html file in your worktree, e.g. "index.html"' },
+          assertion: { type: 'string', description: 'optional JS body that must return truthy on success. Runs in page context. Has access to document, window, etc.' },
+        },
+        required: ['htmlPath'],
+      },
+      run: async ({ htmlPath, assertion }) => {
+        if (typeof htmlPath !== 'string' || !htmlPath.trim()) throw new Error('BrowserTest needs htmlPath');
+        const abs = safe(htmlPath);
+        try {
+          await fs.access(abs);
+        } catch {
+          throw new Error(`htmlPath not found: ${htmlPath}`);
+        }
+        const screenshotName = `_test_${Date.now()}.png`;
+        const screenshotAbs = path.join(cwdResolved, screenshotName);
+        const result = await runBrowserTest({
+          htmlPathAbs: abs,
+          assertion: typeof assertion === 'string' ? assertion : undefined,
+          screenshotPathAbs: screenshotAbs,
+        });
+        const logs = result.consoleLogs.slice(0, 5);
+        const logBlock = logs.length ? `\n--- console (first ${logs.length}) ---\n${logs.join('\n')}` : '';
+        if (result.ok) {
+          return `PASS\nscreenshot: ${screenshotName}${logBlock}`;
+        }
+        return `FAIL — ${result.error}\nscreenshot: (none)${logBlock}`;
       },
     },
   ];
