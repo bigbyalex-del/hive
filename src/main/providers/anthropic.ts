@@ -13,6 +13,7 @@ import { Provider, RunOptions, RunResult, RunEvents, ToolDef } from './types';
 import { validateCommand, audit } from '../runtime';
 import { getMcpToolsForWorker } from '../mcp';
 import { runBrowserTest } from '../browserTest';
+import { remember, recall } from '../memory';
 
 const dynamicImport = new Function('m', 'return import(m)') as (m: string) => Promise<any>;
 
@@ -27,7 +28,7 @@ async function getClient() {
 
 // File tools, scoped to a worktree directory. Anthropic's tool format expects
 // JSON Schema for parameters.
-function fileTools(cwd: string): ToolDef[] {
+function fileTools(cwd: string, agentId: string): ToolDef[] {
   const cwdResolved = path.resolve(cwd);
   const safe = (p: string) => {
     if (typeof p !== 'string' || !p.trim()) throw new Error('path must be a non-empty string');
@@ -321,6 +322,43 @@ function fileTools(cwd: string): ToolDef[] {
       },
     },
     {
+      name: 'Remember',
+      description: 'Save a note to long-term memory so future workers (and your future self) can recall it. Use AFTER finishing a piece of work to capture: what you built, where (file paths), what worked, what didn\'t, surprising design decisions. Pass `tag` to label the note (e.g. "decision", "bug", "api-shape"). Use `shared:true` to make the note visible to all workers, otherwise it\'s scoped to you.',
+      schema: {
+        type: 'object',
+        properties: {
+          content: { type: 'string', description: 'the note to remember (1-2 paragraphs ideal)' },
+          tag: { type: 'string', description: 'optional short label, e.g. "decision", "bug", "auth"' },
+          shared: { type: 'boolean', description: 'if true, all workers can recall this note. Default false (private).' },
+        },
+        required: ['content'],
+      },
+      run: async ({ content, tag, shared }) => {
+        if (typeof content !== 'string' || !content.trim()) throw new Error('Remember needs non-empty content');
+        const owner = shared ? 'shared' : agentId;
+        const id = await remember(owner, content, typeof tag === 'string' ? tag : undefined);
+        return `saved chunk #${id ?? '?'} (${owner}${tag ? `, tag=${tag}` : ''})`;
+      },
+    },
+    {
+      name: 'Recall',
+      description: 'Search long-term memory by semantic similarity. Returns the top-K most relevant chunks (your own + shared). Use BEFORE starting work to discover prior decisions, related code, or known bugs in the area you\'re touching. Query is a natural-language description of what you\'re looking for, not keywords.',
+      schema: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'natural-language description of what you want to recall' },
+          limit: { type: 'number', description: 'max chunks to return (default 5, max 20)' },
+        },
+        required: ['query'],
+      },
+      run: async ({ query, limit }) => {
+        if (typeof query !== 'string' || !query.trim()) throw new Error('Recall needs a query');
+        const results = await recall(agentId, query, typeof limit === 'number' ? limit : 5);
+        if (results.length === 0) return '(no memory yet — call Remember to save notes)';
+        return results.map((r, i) => `[${i + 1}] (score=${r.score.toFixed(3)}${r.tag ? `, tag=${r.tag}` : ''})\n${r.content}`).join('\n\n');
+      },
+    },
+    {
       name: 'BrowserTest',
       description: 'Load an HTML file in a hidden Chromium window, optionally run a JS assertion in page context, and save a PNG screenshot to the worktree. Use AFTER writing UI to verify it actually works before reporting done. The assertion runs as the body of an async function — return truthy to pass, falsy or throw to fail. Examples: `return document.title === "Hello"` or `return document.querySelectorAll(".card").length === 4`. Returns PASS/FAIL plus screenshot filename plus first 5 console messages.',
       schema: {
@@ -370,9 +408,10 @@ export class AnthropicProvider implements Provider {
     // Tools: caller-provided OR built-in file tools (only if cwd is set),
     // augmented with any MCP-server tools currently connected.
     // Manager passes noTools:true so it doesn't waste its single turn on tools.
+    const agentId = (events as any)._agentId ?? 'unknown';
     const baseTools: ToolDef[] = opts.tools?.length
       ? opts.tools
-      : (opts.cwd && fsSync.existsSync(opts.cwd) ? fileTools(opts.cwd) : []);
+      : (opts.cwd && fsSync.existsSync(opts.cwd) ? fileTools(opts.cwd, agentId) : []);
     const mcpTools = opts.noTools ? [] : getMcpToolsForWorker();
     const tools: ToolDef[] = opts.noTools ? [] : [...baseTools, ...mcpTools];
 

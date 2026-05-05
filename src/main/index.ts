@@ -10,6 +10,7 @@ import { captureScreen, snipRegion } from './screenshot';
 import { speak } from './tts';
 import { loadDefaultMcpServers, shutdownAllMcp } from './mcp';
 import { initDb, shutdownDb } from './db';
+import { listTemplates, scaffoldTemplate } from './templates';
 
 dotenv.config({ path: path.join(__dirname, '..', '..', '.env') });
 
@@ -228,6 +229,25 @@ app.whenReady().then(async () => {
     }
   });
   if (!hotkeyOk) console.warn('[hive] failed to register Ctrl+Shift+H global hotkey');
+  ipcMain.handle(IPC.ListTemplates, () => listTemplates());
+  ipcMain.handle(IPC.ScaffoldTemplate, async (_e, payload: { workerId: string; templateName: string; projectName: string }) => {
+    try {
+      const idx = payload.workerId.replace(/^W/i, '');
+      const dir = path.join(process.cwd(), 'worktrees', `wt-${idx}`);
+      await (await import('fs/promises')).mkdir(dir, { recursive: true });
+      const result = await scaffoldTemplate(dir, payload.templateName, payload.projectName, (line) => {
+        mainWindow?.webContents.send(IPC.AgentEvent, { type: 'log', id: payload.workerId, line });
+      });
+      if (result.ok) {
+        mainWindow?.webContents.send(IPC.AgentEvent, { type: 'log', id: payload.workerId, line: `✓ scaffolded ${result.template} (${result.filesWritten.length} files)` });
+      } else {
+        mainWindow?.webContents.send(IPC.AgentEvent, { type: 'log', id: payload.workerId, line: `✗ scaffold failed: ${result.error}` });
+      }
+      return result;
+    } catch (err: any) {
+      return { ok: false, error: err?.message ?? String(err) };
+    }
+  });
   ipcMain.handle(IPC.Speak, async (_e, text: string) => {
     try {
       const bytes = await speak(text);

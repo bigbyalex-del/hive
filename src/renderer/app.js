@@ -629,3 +629,55 @@ document.getElementById('settings-save').addEventListener('click', async () => {
   await window.hive.setModelConfig(config);
   settingsModal.style.display = 'none';
 });
+
+// ---- templates modal ----
+const templatesModal = document.getElementById('templates-modal');
+const templatesList = document.getElementById('templates-list');
+const templatesWorker = document.getElementById('templates-worker');
+const templatesName = document.getElementById('templates-name');
+const templatesStatus = document.getElementById('templates-status');
+
+async function buildTemplatesList() {
+  const tpls = await window.hive.listTemplates();
+  templatesList.innerHTML = tpls.map(t => `
+    <div style="border:1px solid var(--border-strong);border-radius:4px;padding:10px;display:flex;justify-content:space-between;align-items:center;gap:10px;">
+      <div>
+        <div style="font-weight:700;color:var(--text);">${t.name}</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:3px;">${t.description}</div>
+      </div>
+      <button data-tpl="${t.name}" class="tpl-scaffold" style="background:var(--accent);border:none;color:#00171f;font-weight:700;padding:6px 12px;border-radius:4px;cursor:pointer;font-family:inherit;font-size:11px;">Scaffold →</button>
+    </div>
+  `).join('');
+  templatesList.querySelectorAll('.tpl-scaffold').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const tplName = btn.dataset.tpl;
+      const workerId = templatesWorker.value;
+      const projectName = templatesName.value || 'my-app';
+      btn.disabled = true;
+      btn.textContent = '…';
+      templatesStatus.textContent = `scaffolding ${tplName} → ${workerId}…`;
+      const result = await window.hive.scaffoldTemplate(workerId, tplName, projectName);
+      btn.disabled = false;
+      btn.textContent = 'Scaffold →';
+      if (result.ok) {
+        templatesStatus.style.color = 'var(--accent)';
+        templatesStatus.textContent = `✓ ${result.template}: ${result.filesWritten.length} files written to ${workerId}. Watch the worker log.`;
+      } else {
+        templatesStatus.style.color = 'var(--error)';
+        templatesStatus.textContent = `✗ ${result.error}`;
+      }
+    });
+  });
+}
+
+document.getElementById('open-templates').addEventListener('click', async (e) => {
+  e.preventDefault();
+  templatesStatus.textContent = '';
+  templatesStatus.style.color = 'var(--muted)';
+  await buildTemplatesList();
+  templatesModal.style.display = 'flex';
+});
+document.getElementById('close-templates').addEventListener('click', (e) => {
+  e.preventDefault();
+  templatesModal.style.display = 'none';
+});

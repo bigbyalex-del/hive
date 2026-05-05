@@ -77,6 +77,16 @@ export async function initDb(): Promise<void> {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS chunks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ts INTEGER NOT NULL,
+      agent_id TEXT NOT NULL,
+      tag TEXT,
+      content TEXT NOT NULL,
+      embedding TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_chunks_agent ON chunks(agent_id);
   `);
 
   console.log(`[hive] db ready at ${file}`);
@@ -160,6 +170,30 @@ export function getTotalTokens(): { input: number; output: number; cost: number 
     output: output ?? 0,
     cost: 0, // wired up properly when we model per-model pricing
   };
+}
+
+export function insertChunk(opts: { agentId: string; tag?: string; content: string; embedding: number[] }): number | null {
+  if (!db) return null;
+  const stmt = db.prepare('INSERT INTO chunks (ts, agent_id, tag, content, embedding) VALUES (?, ?, ?, ?, ?)');
+  stmt.run([Date.now(), opts.agentId, opts.tag ?? null, opts.content, JSON.stringify(opts.embedding)]);
+  stmt.free();
+  const r = db.exec('SELECT last_insert_rowid() AS id');
+  const id = r[0]?.values?.[0]?.[0] as number | undefined;
+  scheduleSave();
+  return typeof id === 'number' ? id : null;
+}
+
+export function loadChunks(agentId: string): { id: number; tag: string | null; content: string; embedding: number[] }[] {
+  if (!db) return [];
+  const stmt = db.prepare('SELECT id, tag, content, embedding FROM chunks WHERE agent_id = ?');
+  stmt.bind([agentId]);
+  const out: any[] = [];
+  while (stmt.step()) {
+    const row = stmt.get();
+    out.push({ id: row[0], tag: row[1], content: row[2], embedding: JSON.parse(row[3]) });
+  }
+  stmt.free();
+  return out;
 }
 
 export function shutdownDb(): void {

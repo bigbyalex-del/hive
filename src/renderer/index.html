@@ -14,7 +14,29 @@
       runtime <b id="meta-runtime">00:00</b> &nbsp;·&nbsp;
       tokens <b id="meta-tokens">0</b>
       &nbsp;·&nbsp;
+      <a href="#" id="open-templates" style="color:var(--accent);text-decoration:none;margin-right:10px;">📦 templates</a>
       <a href="#" id="open-settings" style="color:var(--accent);text-decoration:none;">⚙ models</a>
+    </div>
+  </div>
+
+  <div id="templates-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:10;align-items:center;justify-content:center;">
+    <div style="background:var(--panel);border:1px solid var(--border-strong);border-radius:8px;padding:20px;min-width:520px;max-height:80vh;overflow:auto;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+        <strong style="color:var(--accent);letter-spacing:1px;">SCAFFOLD A TEMPLATE</strong>
+        <a href="#" id="close-templates" style="color:var(--muted);text-decoration:none;">✕</a>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:12px;">Drops a starter project into a worker's worktree. Skips the LLM phase for boilerplate.</div>
+      <div id="templates-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px;"></div>
+      <div style="display:flex;gap:8px;align-items:center;font-size:12px;">
+        <label style="color:var(--muted);">worker</label>
+        <select id="templates-worker" style="background:var(--panel);border:1px solid var(--border-strong);color:var(--text);padding:4px 6px;border-radius:3px;font-family:inherit;">
+          <option>W1</option><option>W2</option><option>W3</option><option>W4</option>
+          <option>W5</option><option>W6</option><option>W7</option><option>W8</option>
+        </select>
+        <label style="color:var(--muted);margin-left:8px;">project name</label>
+        <input id="templates-name" type="text" value="my-app" style="flex:1;background:var(--panel);border:1px solid var(--border-strong);color:var(--text);padding:4px 6px;border-radius:3px;font-family:inherit;" />
+      </div>
+      <div id="templates-status" style="font-size:11px;color:var(--muted);margin-top:10px;min-height:14px;"></div>
     </div>
   </div>
 

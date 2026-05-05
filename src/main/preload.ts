@@ -26,6 +26,8 @@ const IPC = {
   SnipResult: 'hive:snip-result',
   Speak: 'hive:speak',
   ManagerSpoke: 'hive:manager-spoke',
+  ListTemplates: 'hive:list-templates',
+  ScaffoldTemplate: 'hive:scaffold-template',
 };
 
 contextBridge.exposeInMainWorld('hive', {
@@ -57,6 +59,9 @@ contextBridge.exposeInMainWorld('hive', {
   setModelConfig: (cfg: any) => ipcRenderer.invoke(IPC.SetModelConfig, cfg),
   listProviders: () => ipcRenderer.invoke(IPC.ListProviders),
   transcribeAudio: (bytes: ArrayBuffer, mime: string) => ipcRenderer.invoke(IPC.TranscribeAudio, { bytes, mime }),
+  listTemplates: () => ipcRenderer.invoke(IPC.ListTemplates),
+  scaffoldTemplate: (workerId: string, templateName: string, projectName: string) =>
+    ipcRenderer.invoke(IPC.ScaffoldTemplate, { workerId, templateName, projectName }),
   onAgentEvent: (cb: (evt: any) => void) => {
     const listener = (_: Electron.IpcRendererEvent, evt: any) => cb(evt);
     ipcRenderer.on(IPC.AgentEvent, listener);

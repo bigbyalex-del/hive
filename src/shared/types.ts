@@ -52,6 +52,8 @@ export const IPC = {
   Speak: 'hive:speak',
   AttachImage: 'hive:attach-image',
   ManagerSpoke: 'hive:manager-spoke',
+  ListTemplates: 'hive:list-templates',
+  ScaffoldTemplate: 'hive:scaffold-template',
 } as const;
 
 export type AgentEvent =
