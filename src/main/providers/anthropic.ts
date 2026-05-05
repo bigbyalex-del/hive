@@ -27,9 +27,19 @@ async function getClient() {
 // File tools, scoped to a worktree directory. Anthropic's tool format expects
 // JSON Schema for parameters.
 function fileTools(cwd: string): ToolDef[] {
+  const cwdResolved = path.resolve(cwd);
   const safe = (p: string) => {
-    const abs = path.resolve(cwd, p);
-    if (!abs.startsWith(path.resolve(cwd))) throw new Error(`path '${p}' resolves outside the worktree`);
+    if (typeof p !== 'string' || !p.trim()) throw new Error('path must be a non-empty string');
+    // Reject absolute paths upfront so workers can't write to `/repo/foo` (Windows
+    // resolves that to `C:\repo\foo`) or to a different drive. Forces relative.
+    if (path.isAbsolute(p) || /^[a-zA-Z]:[\\/]/.test(p) || p.startsWith('/') || p.startsWith('\\')) {
+      throw new Error(`absolute path not allowed: '${p}'. Use a path relative to your worktree (e.g. 'index.html' or 'src/foo.ts').`);
+    }
+    const abs = path.resolve(cwdResolved, p);
+    // Boundary check needs a trailing separator so wt-1 doesn't match wt-10.
+    if (abs !== cwdResolved && !abs.startsWith(cwdResolved + path.sep)) {
+      throw new Error(`path '${p}' resolves outside the worktree`);
+    }
     return abs;
   };
 
@@ -136,7 +146,13 @@ function fileTools(cwd: string): ToolDef[] {
         required: ['command'],
       },
       run: async ({ command }) => {
-        const cmd = String(command ?? '').trim();
+        let cmd = String(command ?? '').trim();
+        // Windows cmd.exe `mkdir` doesn't accept `-p` and treats it as a literal
+        // directory name. cmd already creates intermediate dirs without a flag,
+        // so strip `-p` on Windows to keep cross-platform agent prompts working.
+        if (process.platform === 'win32' && /^mkdir\s+-p\s+/.test(cmd)) {
+          cmd = cmd.replace(/^mkdir\s+-p\s+/, 'mkdir ');
+        }
         const v = validateCommand(cmd);
         audit({
           ts: Date.now(),

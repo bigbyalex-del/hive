@@ -25,9 +25,16 @@ async function getOpenAI() {
 // Built-in file tools mirroring the ones the Anthropic SDK provides for free,
 // so workers running on GPT have the same capability surface.
 function builtInTools(cwd: string): ToolDef[] {
+  const cwdResolved = path.resolve(cwd);
   const safe = (p: string) => {
-    const abs = path.resolve(cwd, p);
-    if (!abs.startsWith(path.resolve(cwd))) throw new Error('path outside cwd');
+    if (typeof p !== 'string' || !p.trim()) throw new Error('path must be a non-empty string');
+    if (path.isAbsolute(p) || /^[a-zA-Z]:[\\/]/.test(p) || p.startsWith('/') || p.startsWith('\\')) {
+      throw new Error(`absolute path not allowed: '${p}'. Use a path relative to your worktree.`);
+    }
+    const abs = path.resolve(cwdResolved, p);
+    if (abs !== cwdResolved && !abs.startsWith(cwdResolved + path.sep)) {
+      throw new Error('path outside cwd');
+    }
     return abs;
   };
 

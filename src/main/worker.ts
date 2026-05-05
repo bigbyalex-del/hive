@@ -1,5 +1,6 @@
 import * as path from 'path';
 import * as fs from 'fs/promises';
+import { spawn } from 'child_process';
 import { AgentEvent } from '../shared/types';
 import { getProvider } from './providers/registry';
 import { getAgentConfig } from './config';
@@ -71,6 +72,37 @@ export class Worker {
 
   async ensureWorktree() {
     await fs.mkdir(this.worktreePath, { recursive: true });
+    // Each worker has its own independent git repo so it can commit its work,
+    // diff, and roll back without colliding with the Hive repo or sibling
+    // worktrees. Idempotent — skip if `.git` already exists.
+    try {
+      await fs.access(path.join(this.worktreePath, '.git'));
+    } catch {
+      try {
+        await this.runGitInit();
+        this.emit({ type: 'log', id: this.id, line: '→ git init worktree' });
+      } catch (e: any) {
+        // Non-fatal — worker can still write files. Just no git tracking.
+        this.emit({ type: 'log', id: this.id, line: `⚠ git init failed: ${e.message}` });
+      }
+    }
+  }
+
+  private runGitInit(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const child = spawn('git', ['init', '-b', 'main'], {
+        cwd: this.worktreePath,
+        shell: true,
+        windowsHide: true,
+      });
+      let err = '';
+      child.stderr.on('data', (b) => { err += b.toString(); });
+      child.on('error', reject);
+      child.on('close', (code) => {
+        if (code === 0) resolve();
+        else reject(new Error(err.trim() || `git init exited ${code}`));
+      });
+    });
   }
 
   async execute(subtask: string, imageDataUrl?: string, modelOverride?: string, abortSignal?: AbortSignal): Promise<void> {
