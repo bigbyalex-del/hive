@@ -6,7 +6,89 @@ Started 2026-05-04. Owner: Alex.
 
 ---
 
-## 🌅 Next Session — pick up here (2026-05-05)
+## 🌅 Next Session — pick up here (2026-05-07)
+
+### 0. State as of end-of-day 2026-05-06
+
+- **13 commits ahead of origin** — last push was before `a46a0cd`. `git push` when comfortable.
+- **Working tree:** NOTES.md edits only (this update). Latest commit: `153454a` (v0.9 Babysit MVP).
+- **Babysit, Cost dashboard, Multi-project, Premium theme, Reviewer-no-deadlock, auto-embed all SHIPPED today.** Hive is now genuinely autonomous-capable end-to-end.
+
+### 1. Today's commits (2026-05-06 evening)
+
+| # | Commit | Shipped |
+|---|---|---|
+| 1 | `f613f71` | **v0.5.1 + v0.7.1** — auto-embed-on-Write (Write/Edit hook → OpenAI embeddings → 'shared' agent chunks; sha256-deduped, 12KB cap); Reviewer auto-redispatch on NEEDS_FIX (1 retry, worker keeps branch); "✓ force merge" override button on review-state cards |
+| 2 | `075d92e` | **UI: Lab/Premium theme toggle** — segmented control in titlebar; Premium adds drifting honeycomb hex grid, frosted-glass cells, per-status ambient halos (working=cyan, done=green, review=amber breath, error=red), conic-gradient Manager ring |
+| 3 | `306779f` | **UI: preview filter** — auto-mode ignores files older than session start so stale FXV-style demo content stops haunting the preview |
+| 4 | `71e36df` | **v1.1 Multi-project mode** — projects table + project_id on dispatches/runs/chunks, per-project repo at `worktrees/projects/<slug>`, per-project worker dirs at `_workers/wt-N`, per-project memory + dispatch-history namespacing, titlebar project picker with CREATE + delete + git-clone-on-create |
+| 5 | `064d74d` | **v1.2 Cost dashboard + diff modal** — `pricing.ts` (per-model GBP/1M tokens); new `cost` AgentEvent emitted by Worker/Manager/Reviewer; `recordRun` persists with project_id; titlebar `£` with click-for-breakdown (today/project/all-time + by-model rows); per-worker `diff` link → modal with red/green-coloured patch (backend was already wired via `diffWorkerBranch`) |
+| 6 | `153454a` | **v0.9 Babysit MVP** — `src/main/babysit.ts` polls GitHub repo for issues with `hive-take-this` label; dispatches issue body as task; waits for inFlight=0 + 30s stable; for each worker-N branch ahead of main, force-with-lease push + open PR via REST API. Origin-remote sanity check + token-env validation up front |
+
+### 2. Hive is now FXV-safe-ish
+
+The blocker list collapsed. Item-by-item:
+
+| # | Build | Status |
+|---|---|---|
+| 1 | Specialised roles + exclusive file ownership | ⚠️ Project mode + Reviewer reduce risk; explicit file-claim table still TODO |
+| 2 | Real git per worktree | ✅ v0.3 + v1.0 |
+| 3 | Reviewer role | ✅ v0.7 + auto-redispatch (v0.7.1) + override UI (v0.7.1) |
+| 4 | Cost cap + worker timeout + 429 backoff | ✅ `f2b3624` + v1.2 cost visibility |
+| 5 | Codebase RAG | ✅ v0.5 + v0.5.1 auto-embed (per project namespace, v1.1) |
+| 6 | Personal preference memory | TODO — Claude-Code-style CLAUDE.md auto-load |
+
+**Verdict:** Hive can now be pointed at FXV greenfield work, AND can babysit real GitHub issues overnight on a low-stakes repo.
+
+### 3. Role org-chart status
+
+| # | Role | Status |
+|---|---|---|
+| 1 | Coordinator (= Manager) | ✅ |
+| 2 | Builder (= Worker) | ✅ |
+| 3 | Scout — codebase mapper | TODO |
+| 4 | Reviewer | ✅ + override + retry (v0.7+0.7.1) |
+| 5 | Tester — unit-test loop | partial (BrowserTest only; no test-write-iterate agent) |
+| 6 | Spec Interviewer | ✅ (v0.8) |
+| 7 | Cost Sentinel | ✅ — visible spend (v1.2). Hard-cap per-issue still TODO for Babysit |
+| 8 | Recapper | TODO |
+| 9–12 | Social/Outreach/Deployer/Sentry | TODO |
+
+### 4. Smoke-test list (do this first thing)
+
+1. `npm start`. Check titlebar shows project picker, theme toggle, ◐ babysit, £ readout.
+2. Click PREMIUM theme — confirm honeycomb + glass + per-status halos work on a test dispatch.
+3. Project picker → CREATE "smoke-test" → confirm `worktrees/projects/smoke-test/` appears, dispatch lands in `_workers/wt-N/`.
+4. Run a deliberately failing task ("create login.html with a script that throws") — confirm Reviewer NEEDS_FIX → auto-retry log → if still failing, "✓ force merge" button shows on the worker card.
+5. Click `diff` on a done worker — confirm red/green patch.
+6. £ readout updates after a dispatch; click → breakdown modal.
+7. **Babysit dry-run** (only on a throwaway repo): clone-on-create a project from a GitHub repo, set `GITHUB_TOKEN`, tag a low-stakes issue with `hive-take-this`, watch the log.
+
+### 5. Recommended next push (in priority order)
+
+**(a) Babysit hardening (~2 hr)** — process-issues persisted to `meta` table (don't replay across restarts), per-issue cost cap, comment on issue with PR link after success. Currently MVP loses the processed-issues set on restart.
+
+**(b) Tester role (~3 hr)** — writes + iterates on unit tests until green. Closes the "looks right but doesn't work" gap for non-UI code, raises Babysit reliability dramatically.
+
+**(c) Personal preference memory port (~3 hr)** — read CLAUDE.md / .hive/preferences.md and auto-inject into Worker SYSTEM. Eliminates "no emoji" / "gradient on data viz only" being typed every prompt.
+
+**(d) Exclusive file ownership table (~5 hr)** — last item on the original FXV-safe gate. Manager allocates files to workers; ToolDef rejects writes outside the worker's claim.
+
+**(e) Cost cap per babysit-issue** — separate from total run cap; lets you set "no issue costs more than £2".
+
+### 6. Known issues carried forward
+
+- **Web Speech API dead in Electron** — Whisper-only.
+- **MCP fs rooted at `worktrees/`** — workers can't reach project-root files (NOTES, package.json from outside their wt).
+- **Audit log only covers Run + MCP** — Read/Write/Edit/BrowserTest not logged.
+- **Babysit `processed` set is in-memory only** — restart replays issues. Fix in (a).
+- **Project switch doesn't recreate per-project MCP fs root** — MCP server still scoped at `worktrees/` not `worktrees/projects/<slug>/`.
+- **Manager dispatch history is currently 20 items max per project** — fine for now, watch on long projects.
+- **Pricing in `pricing.ts` should be refreshed quarterly** — Jan 2026 USD rates × 0.80.
+
+---
+
+## 🌅 Previous pickup (2026-05-05) — superseded
 
 ### 0. Verify state still works (2 min)
 
