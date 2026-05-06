@@ -295,6 +295,10 @@ function appendActivity(id, line) {
 // ---- preview pane (auto-load latest html from any worktree) ----
 let previewWorker = 'auto'; // 'auto' = whichever worker has most recent file
 let previewInterval = null;
+// Files older than this are stale artifacts from prior sessions — never load
+// them in auto mode, otherwise yesterday's demo screen haunts today's preview.
+// Trimmed by 60s so a file written milliseconds before launch isn't excluded.
+const previewSessionStart = Date.now() - 60_000;
 
 async function refreshPreviewSources() {
   // v1.0 — 'project' shows the merged main branch (canonical state). 'auto'
@@ -328,7 +332,13 @@ async function refreshPreview() {
   for (const id of ids) {
     const res = await window.hive.listWorktreeFiles(id);
     if (!res.ok) continue;
-    const html = res.files.find(f => f.path.endsWith('.html'));
+    // In auto mode, ignore files written before this session started — those
+    // are leftovers from prior runs and shouldn't outrank an empty project.
+    // When a specific worker is picked, show whatever's there (the user asked).
+    const candidates = previewWorker === 'auto'
+      ? res.files.filter(f => f.mtime >= previewSessionStart)
+      : res.files;
+    const html = candidates.find(f => f.path.endsWith('.html'));
     if (html && (!best || html.mtime > best.mtime)) {
       best = { id, path: html.path, mtime: html.mtime };
     }
