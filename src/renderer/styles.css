@@ -431,3 +431,239 @@ body.ptype-ios #preview-popout {
   0%, 100% { r: 5; opacity: 1; }
   50%      { r: 7; opacity: 0.55; }
 }
+
+/* ---- Theme toggle (titlebar segmented control) ---- */
+.theme-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-right: 12px;
+  vertical-align: middle;
+}
+.theme-toggle button {
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 10px;
+  letter-spacing: 1.2px;
+  padding: 3px 9px;
+  cursor: pointer;
+  transition: background 0.18s, color 0.18s;
+}
+.theme-toggle button + button { border-left: 1px solid var(--border-strong); }
+.theme-toggle button:hover { color: var(--text); }
+.theme-toggle button.active {
+  background: var(--accent);
+  color: #00171f;
+  font-weight: 700;
+}
+
+/* =====================================================================
+   PREMIUM THEME — opt-in via body.theme-premium
+   Honeycomb ambient bg · frosted glass cells · per-status glow halos ·
+   animated Manager border · richer Hive amber accent. Default Lab look
+   stays untouched if the toggle isn't engaged.
+   ===================================================================== */
+
+body.theme-premium {
+  background:
+    radial-gradient(1100px 720px at 50% 110%, rgba(192,132,252,0.10), transparent 60%),
+    radial-gradient(900px 700px at 92% -10%, rgba(34,211,238,0.07), transparent 55%),
+    radial-gradient(820px 620px at 4% 30%, rgba(251,191,36,0.05), transparent 55%),
+    var(--bg);
+}
+
+/* Faint hex-grid ambient layer using an inline SVG — sits behind everything,
+   never intercepts clicks, scales infinitely with the viewport. */
+body.theme-premium::before {
+  content: '';
+  position: fixed; inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.06;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='56' height='48' viewBox='0 0 56 48'><path fill='none' stroke='%23fbbf24' stroke-width='1' d='M14 0 L42 0 L56 24 L42 48 L14 48 L0 24 Z'/></svg>");
+  background-size: 56px 48px;
+  animation: hex-drift 60s linear infinite;
+}
+@keyframes hex-drift {
+  to { background-position: 56px 96px; }
+}
+
+body.theme-premium .titlebar,
+body.theme-premium .taskbar,
+body.theme-premium .grid,
+body.theme-premium .drawer,
+body.theme-premium .footer {
+  position: relative;
+  z-index: 1;
+}
+
+body.theme-premium .titlebar {
+  border-bottom: 1px solid rgba(43,58,77,0.5);
+}
+body.theme-premium .titlebar .brand {
+  background: linear-gradient(135deg, var(--honey-light) 0%, var(--honey) 35%, var(--accent) 70%, var(--manager) 100%);
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 0 12px rgba(251,191,36,0.18));
+}
+
+body.theme-premium .taskbar input {
+  background: rgba(17,24,33,0.55);
+  border: 1px solid rgba(43,58,77,0.7);
+  backdrop-filter: blur(10px);
+}
+body.theme-premium .taskbar input:focus {
+  border-color: var(--honey);
+  box-shadow: 0 0 0 3px rgba(251,191,36,0.12);
+}
+body.theme-premium .taskbar button {
+  background: linear-gradient(135deg, var(--accent) 0%, #0ea5b7 100%);
+  box-shadow: 0 4px 14px rgba(34,211,238,0.18);
+}
+body.theme-premium .taskbar button:hover {
+  filter: brightness(1.12);
+  transform: translateY(-1px);
+}
+
+/* Frosted-glass cells. Uses backdrop-filter for the blur and a subtle inset
+   highlight on top to give it a sealed, glossy edge. */
+body.theme-premium .cell {
+  background: linear-gradient(180deg, rgba(20,28,40,0.62) 0%, rgba(14,20,29,0.62) 100%);
+  border: 1px solid rgba(43,58,77,0.55);
+  backdrop-filter: blur(14px) saturate(1.15);
+  -webkit-backdrop-filter: blur(14px) saturate(1.15);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.04),
+    0 10px 28px rgba(0,0,0,0.4);
+  transition: border-color 0.25s ease, box-shadow 0.35s ease, transform 0.18s ease;
+}
+body.theme-premium .cell:hover {
+  transform: translateY(-1px);
+  border-color: rgba(251,191,36,0.28);
+}
+
+/* Per-status ambient halos. Status class is mirrored onto each .cell by
+   setStatus() so we can paint without JS in the stylesheet. */
+body.theme-premium .cell.cell-working {
+  border-color: rgba(56,189,248,0.45);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.05),
+    0 0 0 1px rgba(56,189,248,0.18),
+    0 0 32px rgba(56,189,248,0.22),
+    0 10px 28px rgba(0,0,0,0.4);
+}
+body.theme-premium .cell.cell-done {
+  border-color: rgba(74,222,128,0.40);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.05),
+    0 0 0 1px rgba(74,222,128,0.18),
+    0 0 26px rgba(74,222,128,0.18),
+    0 10px 28px rgba(0,0,0,0.4);
+}
+body.theme-premium .cell.cell-review {
+  border-color: rgba(251,191,36,0.55);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.05),
+    0 0 0 1px rgba(251,191,36,0.25),
+    0 0 32px rgba(251,191,36,0.28),
+    0 10px 28px rgba(0,0,0,0.4);
+  animation: review-breath 2.4s ease-in-out infinite;
+}
+body.theme-premium .cell.cell-error {
+  border-color: rgba(248,113,113,0.50);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.05),
+    0 0 0 1px rgba(248,113,113,0.22),
+    0 0 28px rgba(248,113,113,0.22),
+    0 10px 28px rgba(0,0,0,0.4);
+}
+@keyframes review-breath {
+  0%, 100% { box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.05),
+    0 0 0 1px rgba(251,191,36,0.25),
+    0 0 22px rgba(251,191,36,0.18),
+    0 10px 28px rgba(0,0,0,0.4); }
+  50% { box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.05),
+    0 0 0 1px rgba(251,191,36,0.32),
+    0 0 40px rgba(251,191,36,0.32),
+    0 10px 28px rgba(0,0,0,0.4); }
+}
+
+/* Manager — animated gradient ring drawn via a layered ::before so the
+   filled glass surface stays crisp underneath. */
+body.theme-premium .cell.manager {
+  background:
+    linear-gradient(180deg, rgba(28,18,52,0.66) 0%, rgba(15,20,34,0.66) 100%);
+  border: 1px solid transparent;
+  position: relative;
+}
+body.theme-premium .cell.manager::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: 7px;
+  padding: 1px;
+  background: conic-gradient(from 0deg,
+    var(--manager) 0deg,
+    var(--accent) 120deg,
+    var(--honey) 240deg,
+    var(--manager) 360deg);
+  -webkit-mask:
+    linear-gradient(#000, #000) content-box,
+    linear-gradient(#000, #000);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  pointer-events: none;
+  animation: manager-ring 14s linear infinite;
+  opacity: 0.85;
+}
+body.theme-premium .cell.manager .id { color: var(--manager); text-shadow: 0 0 14px rgba(192,132,252,0.45); }
+@keyframes manager-ring {
+  to { transform: rotate(1turn); }
+}
+
+/* Status dot in Premium gets a softer halo via box-shadow stacking. */
+body.theme-premium .s-working .dot {
+  box-shadow:
+    0 0 0 2px rgba(56,189,248,0.18),
+    0 0 14px rgba(56,189,248,0.7);
+}
+body.theme-premium .s-done .dot { box-shadow: 0 0 0 2px rgba(74,222,128,0.18), 0 0 12px rgba(74,222,128,0.55); }
+body.theme-premium .s-review .dot { box-shadow: 0 0 0 2px rgba(251,191,36,0.22), 0 0 14px rgba(251,191,36,0.7); }
+body.theme-premium .s-error .dot { box-shadow: 0 0 0 2px rgba(248,113,113,0.22), 0 0 14px rgba(248,113,113,0.7); }
+
+/* Drawer matches the glass treatment so it doesn't look pasted on top. */
+body.theme-premium .drawer {
+  background: rgba(17,24,33,0.62);
+  border: 1px solid rgba(43,58,77,0.55);
+  backdrop-filter: blur(14px) saturate(1.1);
+  -webkit-backdrop-filter: blur(14px) saturate(1.1);
+}
+body.theme-premium .drawer-tabs {
+  background: rgba(14,20,28,0.55);
+  border-bottom: 1px solid rgba(43,58,77,0.5);
+}
+body.theme-premium .dtab.active {
+  background: rgba(251,191,36,0.10);
+  color: var(--honey);
+  border-color: rgba(251,191,36,0.35);
+}
+
+/* Tweak power lines so they read against the busier background. */
+body.theme-premium .power-line {
+  stroke: var(--honey-light);
+  filter: drop-shadow(0 0 8px var(--honey));
+}
+body.theme-premium .plug-active {
+  fill: var(--honey-light);
+  filter: drop-shadow(0 0 10px var(--honey));
+}
+
+body.theme-premium .footer { border-top: 1px solid rgba(43,58,77,0.5); }
+body.theme-premium .badge { color: var(--honey); }

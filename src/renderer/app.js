@@ -77,9 +77,35 @@ function setStatus(id, status) {
   c.statusEl.className = 'status s-' + status;
   c.statusText.textContent = status;
   c.status = status;
+  // Mirror status onto the cell itself so the Premium theme can drive a
+  // per-status ambient glow without needing JS in the stylesheet.
+  c.el.classList.remove('cell-idle', 'cell-working', 'cell-done', 'cell-error', 'cell-review');
+  c.el.classList.add('cell-' + status);
   if (c.cancelEl) c.cancelEl.style.display = status === 'working' ? 'inline' : 'none';
   if (c.overrideEl) c.overrideEl.style.display = status === 'review' ? 'inline' : 'none';
   updatePowerLines();
+}
+
+// ---- theme toggle (Lab default / Premium glass + honeycomb) ----
+(function initTheme() {
+  const saved = (() => { try { return localStorage.getItem('hive-theme'); } catch { return null; } })();
+  applyTheme(saved === 'premium' ? 'premium' : 'lab');
+  const toggle = document.getElementById('theme-toggle');
+  if (!toggle) return;
+  toggle.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-theme]');
+    if (!btn) return;
+    applyTheme(btn.dataset.theme);
+  });
+})();
+function applyTheme(name) {
+  const isPremium = name === 'premium';
+  document.body.classList.toggle('theme-premium', isPremium);
+  document.body.classList.toggle('theme-lab', !isPremium);
+  try { localStorage.setItem('hive-theme', isPremium ? 'premium' : 'lab'); } catch { /* ignore quota */ }
+  document.querySelectorAll('#theme-toggle button[data-theme]').forEach(b => {
+    b.classList.toggle('active', b.dataset.theme === (isPremium ? 'premium' : 'lab'));
+  });
 }
 function setTask(id, task) {
   const c = cells.get(id); if (!c) return;
