@@ -377,8 +377,15 @@ function fileTools(cwd: string, agentId: string): ToolDef[] {
         } catch {
           throw new Error(`htmlPath not found: ${htmlPath}`);
         }
-        const screenshotName = `_test_${Date.now()}.png`;
-        const screenshotAbs = path.join(cwdResolved, screenshotName);
+        // v1.0.1 — write screenshots OUTSIDE the worker's worktree so they
+        // don't pollute git status and confuse Reviewer ("worker delivered a
+        // PNG instead of the HTML"). Mirror the worker dir name into a
+        // sibling ".hive-screenshots/" so we still get per-worker scoping.
+        const screenshotName = `test_${Date.now()}.png`;
+        const workerDirName = path.basename(cwdResolved); // e.g. "wt-1"
+        const shotsDir = path.join(cwdResolved, '..', '.hive-screenshots', workerDirName);
+        const screenshotAbs = path.join(shotsDir, screenshotName);
+        await fs.mkdir(shotsDir, { recursive: true });
         const result = await runBrowserTest({
           htmlPathAbs: abs,
           assertion: typeof assertion === 'string' ? assertion : undefined,
@@ -386,8 +393,10 @@ function fileTools(cwd: string, agentId: string): ToolDef[] {
         });
         const logs = result.consoleLogs.slice(0, 5);
         const logBlock = logs.length ? `\n--- console (first ${logs.length}) ---\n${logs.join('\n')}` : '';
+        // Cite a shareable label only — workers can't open PNGs anyway, and we
+        // don't want them tempted to read it as a deliverable.
         if (result.ok) {
-          return `PASS\nscreenshot: ${screenshotName}${logBlock}`;
+          return `PASS\nscreenshot saved (worker test artifact, outside worktree)${logBlock}`;
         }
         return `FAIL — ${result.error}\nscreenshot: (none)${logBlock}`;
       },

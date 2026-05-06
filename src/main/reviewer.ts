@@ -50,7 +50,7 @@ function gitStatus(cwd: string): Promise<string> {
   });
 }
 
-async function snapshotChangedFiles(cwd: string, maxFiles = 6, maxBytes = 1500): Promise<string> {
+async function snapshotChangedFiles(cwd: string, maxFiles = 6, maxBytes = 8000): Promise<string> {
   const status = await gitStatus(cwd);
   if (!status.trim()) return '(no tracked changes)';
   const lines = status.split('\n').map(l => l.trim()).filter(Boolean).slice(0, maxFiles);
@@ -60,6 +60,13 @@ async function snapshotChangedFiles(cwd: string, maxFiles = 6, maxBytes = 1500):
     const parts = line.split(/\s+/);
     const rel = parts[parts.length - 1];
     if (!rel) continue;
+    // Skip BrowserTest artifacts and other binary noise so Reviewer judges the
+    // actual deliverable, not test screenshots accidentally tracked.
+    if (/\.(png|jpg|jpeg|gif|webp|ico|pdf|zip|woff2?|ttf|otf)$/i.test(rel)) {
+      blocks.push(`--- ${rel} ---\n(binary asset, skipped)`);
+      continue;
+    }
+    if (rel.startsWith('_test_') || rel.startsWith('.hive-screenshots/')) continue;
     const abs = path.join(cwd, rel);
     try {
       const st = await fs.stat(abs);

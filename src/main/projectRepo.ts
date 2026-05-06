@@ -74,13 +74,40 @@ export async function ensureProjectRepo(): Promise<void> {
     await run(PROJECT_DIR, ['init', '-b', 'main']);
     await run(PROJECT_DIR, ['config', 'user.email', 'hive@youraihive.com']);
     await run(PROJECT_DIR, ['config', 'user.name', 'Hive']);
-    // Empty initial commit so we can create branches off main before any
-    // template scaffolds files.
-    await run(PROJECT_DIR, ['commit', '--allow-empty', '-m', 'init']);
+    // Defensive .gitignore so postInstall artifacts (node_modules), worker
+    // test screenshots, and OS noise never leak into commits or merges.
+    const gitignore = [
+      'node_modules/',
+      '.hive-screenshots/',
+      '_test_*.png',
+      '_screenshot.png',
+      '.DS_Store',
+      'Thumbs.db',
+      '',
+    ].join('\n');
+    await fs.writeFile(path.join(PROJECT_DIR, '.gitignore'), gitignore, 'utf8');
+    await run(PROJECT_DIR, ['add', '.gitignore']);
+    await run(PROJECT_DIR, ['commit', '-m', 'init']);
   } else {
     // Make sure config is set even on existing repos (recovery path).
     await run(PROJECT_DIR, ['config', 'user.email', 'hive@youraihive.com']).catch(() => {});
     await run(PROJECT_DIR, ['config', 'user.name', 'Hive']).catch(() => {});
+    // Ensure .gitignore exists on pre-existing repos that pre-date v1.0.1.
+    const gi = path.join(PROJECT_DIR, '.gitignore');
+    if (!await exists(gi)) {
+      const gitignore = [
+        'node_modules/',
+        '.hive-screenshots/',
+        '_test_*.png',
+        '_screenshot.png',
+        '.DS_Store',
+        'Thumbs.db',
+        '',
+      ].join('\n');
+      await fs.writeFile(gi, gitignore, 'utf8');
+      await run(PROJECT_DIR, ['add', '.gitignore'], { ignoreExit: true });
+      await run(PROJECT_DIR, ['commit', '-m', 'add .gitignore'], { ignoreExit: true });
+    }
   }
   initialised = true;
 }
