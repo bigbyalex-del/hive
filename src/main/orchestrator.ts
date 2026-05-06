@@ -3,6 +3,7 @@ import { Manager, DispatchRecord } from './manager';
 import { Worker } from './worker';
 import { Reviewer } from './reviewer';
 import { recordDispatch, loadRecentDispatches } from './db';
+import { commitWorkerChanges, mergeWorkerBranch, ensureProjectRepo } from './projectRepo';
 import * as path from 'path';
 
 const WORKER_COUNT = 8;
@@ -57,6 +58,10 @@ export class Orchestrator {
     } catch (err) {
       console.warn('[hive] failed to load dispatch history:', err);
     }
+
+    // v1.0 Project mode — kick off parent repo init in the background so it's
+    // ready before the first worker dispatch. Don't block construction.
+    ensureProjectRepo().catch(err => console.warn('[hive] project repo init failed:', err));
   }
 
   private makeSnapshot(id: string, role: AgentRole): AgentSnapshot {
@@ -203,16 +208,45 @@ export class Orchestrator {
             this.inFlight.delete(worker.id);
             unsubscribe();
             if (workerSucceeded && this.reviewEnabled && !this.runCancelled) {
+              const worktreePath = path.join(process.cwd(), 'worktrees', `wt-${worker.id.slice(1)}`);
+              let verdictPassed = false;
               try {
-                const worktreePath = path.join(process.cwd(), 'worktrees', `wt-${worker.id.slice(1)}`);
-                await this.reviewer.review({
+                const verdict = await this.reviewer.review({
                   workerId: worker.id,
                   worktreePath,
                   originalTask: subtask.task,
                   workerSummary,
                 });
+                verdictPassed = verdict.pass;
               } catch (err: any) {
                 this.emit({ type: 'log', id: worker.id, line: `🔍 review error: ${err?.message ?? err}` });
+                // Default to PASS on reviewer failure so a transient Haiku
+                // hiccup doesn't strand committed work in limbo.
+                verdictPassed = true;
+              }
+
+              if (verdictPassed) {
+                try {
+                  const committed = await commitWorkerChanges(worker.id, workerSummary || subtask.task);
+                  if (committed) {
+                    const merge = await mergeWorkerBranch(worker.id, workerSummary || subtask.task);
+                    if (merge.ok) {
+                      if (merge.alreadyMerged) {
+                        this.emit({ type: 'log', id: worker.id, line: '🌿 nothing to merge' });
+                      } else {
+                        this.emit({ type: 'log', id: worker.id, line: '🌿 merged into main' });
+                      }
+                    } else {
+                      const files = merge.conflict?.length ? ` (${merge.conflict.slice(0, 3).join(', ')})` : '';
+                      this.emit({ type: 'log', id: worker.id, line: `⚠ merge conflict${files} — branch left for manual resolution` });
+                      this.emit({ type: 'status', id: worker.id, status: 'review' });
+                    }
+                  } else {
+                    this.emit({ type: 'log', id: worker.id, line: '· no file changes to commit' });
+                  }
+                } catch (err: any) {
+                  this.emit({ type: 'log', id: worker.id, line: `✗ commit/merge: ${err?.message ?? err}` });
+                }
               }
             }
           });

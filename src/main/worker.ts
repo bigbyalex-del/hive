@@ -1,10 +1,10 @@
 import * as path from 'path';
 import * as fs from 'fs/promises';
-import { spawn } from 'child_process';
 import { AgentEvent } from '../shared/types';
 import { getProvider } from './providers/registry';
 import { getAgentConfig } from './config';
 import { ProviderName } from './providers/types';
+import { setupWorkerWorktree, workerWorktreePath } from './projectRepo';
 
 // Manager addresses models by alias (haiku/sonnet/opus). Workers translate the
 // alias into a concrete model id matching their configured provider.
@@ -74,43 +74,24 @@ export class Worker {
   private worktreePath: string;
 
   constructor(public id: string, private emit: (evt: AgentEvent) => void) {
-    const idx = id.slice(1);
-    this.worktreePath = path.join(process.cwd(), 'worktrees', `wt-${idx}`);
+    this.worktreePath = workerWorktreePath(id);
   }
 
+  // v1.0 Project mode — every dispatch starts on a fresh branch off main.
+  // setupWorkerWorktree tears down any prior wt-N, recreates the worker's
+  // branch from current main, and adds it as a real git worktree so workers
+  // inherit the project's scaffolded codebase and any merged peer work.
   async ensureWorktree() {
-    await fs.mkdir(this.worktreePath, { recursive: true });
-    // Each worker has its own independent git repo so it can commit its work,
-    // diff, and roll back without colliding with the Hive repo or sibling
-    // worktrees. Idempotent — skip if `.git` already exists.
     try {
-      await fs.access(path.join(this.worktreePath, '.git'));
-    } catch {
-      try {
-        await this.runGitInit();
-        this.emit({ type: 'log', id: this.id, line: '→ git init worktree' });
-      } catch (e: any) {
-        // Non-fatal — worker can still write files. Just no git tracking.
-        this.emit({ type: 'log', id: this.id, line: `⚠ git init failed: ${e.message}` });
-      }
+      await setupWorkerWorktree(this.id);
+      this.emit({ type: 'log', id: this.id, line: `→ git worktree on branch worker-${this.id.slice(1).toLowerCase()}` });
+    } catch (e: any) {
+      // Fall back to a plain dir so the worker can still write files even if
+      // the project repo isn't healthy. Won't be commitable, but better than
+      // failing the dispatch outright.
+      await fs.mkdir(this.worktreePath, { recursive: true });
+      this.emit({ type: 'log', id: this.id, line: `⚠ worktree setup failed (${e.message}) — using plain dir` });
     }
-  }
-
-  private runGitInit(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const child = spawn('git', ['init', '-b', 'main'], {
-        cwd: this.worktreePath,
-        shell: true,
-        windowsHide: true,
-      });
-      let err = '';
-      child.stderr.on('data', (b) => { err += b.toString(); });
-      child.on('error', reject);
-      child.on('close', (code) => {
-        if (code === 0) resolve();
-        else reject(new Error(err.trim() || `git init exited ${code}`));
-      });
-    });
   }
 
   async execute(subtask: string, imageDataUrl?: string, modelOverride?: string, abortSignal?: AbortSignal): Promise<void> {

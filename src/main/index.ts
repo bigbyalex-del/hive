@@ -11,6 +11,7 @@ import { speak } from './tts';
 import { loadDefaultMcpServers, shutdownAllMcp } from './mcp';
 import { initDb, shutdownDb } from './db';
 import { listTemplates, scaffoldTemplate } from './templates';
+import { projectDir, commitProjectChanges, ensureProjectRepo, diffWorkerBranch } from './projectRepo';
 
 dotenv.config({ path: path.join(__dirname, '..', '..', '.env') });
 
@@ -172,8 +173,11 @@ app.whenReady().then(async () => {
   ipcMain.handle(IPC.ListWorktreeFiles, async (_e, workerId: string) => {
     const fs = await import('fs/promises');
     const path = await import('path');
-    const idx = workerId.replace(/^W/i, '');
-    const dir = path.join(process.cwd(), 'worktrees', `wt-${idx}`);
+    // v1.0 — accept 'project' to peek at the merged main branch; W1..W8 still
+    // route to per-worker branches for live preview of in-flight work.
+    const dir = workerId === 'project'
+      ? projectDir()
+      : path.join(process.cwd(), 'worktrees', `wt-${workerId.replace(/^W/i, '')}`);
     try {
       const out: { path: string; mtime: number; size: number }[] = [];
       async function walk(d: string, rel = '') {
@@ -199,8 +203,9 @@ app.whenReady().then(async () => {
   ipcMain.handle(IPC.ReadWorktreeFile, async (_e, payload: { workerId: string; path: string }) => {
     const fs = await import('fs/promises');
     const path = await import('path');
-    const idx = payload.workerId.replace(/^W/i, '');
-    const dir = path.join(process.cwd(), 'worktrees', `wt-${idx}`);
+    const dir = payload.workerId === 'project'
+      ? projectDir()
+      : path.join(process.cwd(), 'worktrees', `wt-${payload.workerId.replace(/^W/i, '')}`);
     const abs = path.resolve(dir, payload.path);
     if (!abs.startsWith(path.resolve(dir))) return { ok: false, error: 'path outside worktree' };
     try {
@@ -269,17 +274,22 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle(IPC.ListTemplates, () => listTemplates());
   ipcMain.handle(IPC.ScaffoldTemplate, async (_e, payload: { workerId: string; templateName: string; projectName: string }) => {
+    // v1.0 Project mode — templates scaffold into the parent project repo so
+    // every worker dispatch branches off a populated codebase. workerId is
+    // kept on the IPC surface for log attribution but no longer affects path.
     try {
-      const idx = payload.workerId.replace(/^W/i, '');
-      const dir = path.join(process.cwd(), 'worktrees', `wt-${idx}`);
-      await (await import('fs/promises')).mkdir(dir, { recursive: true });
+      await ensureProjectRepo();
+      const dir = projectDir();
+      const logId = 'M';
       const result = await scaffoldTemplate(dir, payload.templateName, payload.projectName, (line) => {
-        mainWindow?.webContents.send(IPC.AgentEvent, { type: 'log', id: payload.workerId, line });
+        mainWindow?.webContents.send(IPC.AgentEvent, { type: 'log', id: logId, line });
       });
       if (result.ok) {
-        mainWindow?.webContents.send(IPC.AgentEvent, { type: 'log', id: payload.workerId, line: `✓ scaffolded ${result.template} (${result.filesWritten.length} files)` });
+        const committed = await commitProjectChanges(`scaffold: ${result.template}`).catch(() => false);
+        const tag = committed ? ' + committed to main' : '';
+        mainWindow?.webContents.send(IPC.AgentEvent, { type: 'log', id: logId, line: `✓ scaffolded ${result.template} (${result.filesWritten.length} files)${tag}` });
       } else {
-        mainWindow?.webContents.send(IPC.AgentEvent, { type: 'log', id: payload.workerId, line: `✗ scaffold failed: ${result.error}` });
+        mainWindow?.webContents.send(IPC.AgentEvent, { type: 'log', id: logId, line: `✗ scaffold failed: ${result.error}` });
       }
       return result;
     } catch (err: any) {

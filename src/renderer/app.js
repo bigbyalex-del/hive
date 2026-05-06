@@ -253,10 +253,15 @@ let previewWorker = 'auto'; // 'auto' = whichever worker has most recent file
 let previewInterval = null;
 
 async function refreshPreviewSources() {
-  // Build dropdown options from worker list + auto.
-  const ids = ['auto', 'W1', 'W2', 'W3', 'W4', 'W5', 'W6', 'W7', 'W8'];
+  // v1.0 — 'project' shows the merged main branch (canonical state). 'auto'
+  // prefers project; falls back to the most recent in-flight worker branch
+  // so users see live work before it merges.
+  const ids = ['auto', 'project', 'W1', 'W2', 'W3', 'W4', 'W5', 'W6', 'W7', 'W8'];
   if (previewSource.options.length !== ids.length) {
-    previewSource.innerHTML = ids.map(id => `<option value="${id}">${id}</option>`).join('');
+    previewSource.innerHTML = ids.map(id => {
+      const label = id === 'project' ? '🌿 main' : id;
+      return `<option value="${id}">${label}</option>`;
+    }).join('');
     previewSource.value = previewWorker;
     previewSource.addEventListener('change', () => { previewWorker = previewSource.value; refreshPreview(); });
   }
@@ -269,8 +274,10 @@ let lastPreviewContent = '';
 
 async function refreshPreview() {
   if (!previewPane.classList.contains('active')) return;
+  // v1.0 — 'auto' prefers the merged project main; falls back to per-worker
+  // branches so users see in-flight work before merge.
   const ids = previewWorker === 'auto'
-    ? ['W1', 'W2', 'W3', 'W4', 'W5', 'W6', 'W7', 'W8']
+    ? ['project', 'W1', 'W2', 'W3', 'W4', 'W5', 'W6', 'W7', 'W8']
     : [previewWorker];
 
   let best = null;
@@ -281,6 +288,9 @@ async function refreshPreview() {
     if (html && (!best || html.mtime > best.mtime)) {
       best = { id, path: html.path, mtime: html.mtime };
     }
+    // In auto mode, the project main wins as soon as it has an .html — don't
+    // override with worker branches that often contain stale pre-merge state.
+    if (previewWorker === 'auto' && id === 'project' && best) break;
   }
   if (!best) {
     const empty = '<body style="font-family:monospace;padding:24px;color:#888;">no .html files in worktrees yet</body>';
