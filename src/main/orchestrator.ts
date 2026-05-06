@@ -3,7 +3,7 @@ import { Manager, DispatchRecord } from './manager';
 import { Worker } from './worker';
 import { Reviewer } from './reviewer';
 import { recordDispatch, loadRecentDispatches } from './db';
-import { commitWorkerChanges, mergeWorkerBranch, ensureProjectRepo } from './projectRepo';
+import { commitWorkerChanges, mergeWorkerBranch, ensureProjectRepo, workerWorktreePath, setActiveProject, activeProjectId } from './projectRepo';
 import * as path from 'path';
 
 const WORKER_COUNT = 8;
@@ -57,9 +57,16 @@ export class Orchestrator {
       this.agents.set(id, this.makeSnapshot(id, 'coder'));
     }
 
-    // Restore Manager's chat memory from disk so "what have we built?" survives restart.
+    this.reloadHistoryForActiveProject();
+
+    // v1.0 Project mode — kick off parent repo init in the background so it's
+    // ready before the first worker dispatch. Don't block construction.
+    ensureProjectRepo().catch(err => console.warn('[hive] project repo init failed:', err));
+  }
+
+  private reloadHistoryForActiveProject(): void {
     try {
-      const recent = loadRecentDispatches(20);
+      const recent = loadRecentDispatches(20, activeProjectId());
       this.dispatchHistory = recent.map(r => ({
         userInput: r.userInput,
         subtasks: r.subtasks,
@@ -67,11 +74,33 @@ export class Orchestrator {
       }));
     } catch (err) {
       console.warn('[hive] failed to load dispatch history:', err);
+      this.dispatchHistory = [];
     }
+  }
 
-    // v1.0 Project mode — kick off parent repo init in the background so it's
-    // ready before the first worker dispatch. Don't block construction.
-    ensureProjectRepo().catch(err => console.warn('[hive] project repo init failed:', err));
+  // Called by the IPC layer after the active project changes. Refuses while
+  // workers are still in-flight so half-dispatched work doesn't leak across
+  // projects. Caller is responsible for setActiveProject() + DB update before
+  // calling this — orchestrator only owns the in-memory state.
+  async onProjectSwitched(): Promise<{ ok: boolean; error?: string }> {
+    if (this.inFlight.size > 0) {
+      return { ok: false, error: `cancel ${this.inFlight.size} in-flight worker(s) before switching projects` };
+    }
+    this.reloadHistoryForActiveProject();
+    this.reviewState.clear();
+    // Reset all worker cards to idle — their old worktrees belonged to the
+    // prior project and the next dispatch will recreate from new project's main.
+    for (const [id, snap] of this.agents) {
+      if (id === 'M') continue;
+      snap.status = 'idle';
+      snap.task = null;
+      snap.log = [];
+      snap.startedAt = null;
+      this.emit({ type: 'status', id, status: 'idle' });
+      this.emit({ type: 'task', id, task: null });
+    }
+    try { await ensureProjectRepo(); } catch (err) { console.warn('[hive] post-switch repo init:', err); }
+    return { ok: true };
   }
 
   private makeSnapshot(id: string, role: AgentRole): AgentSnapshot {
@@ -180,7 +209,7 @@ export class Orchestrator {
         timestamp: Date.now(),
       });
       if (this.dispatchHistory.length > 20) this.dispatchHistory.shift();
-      try { recordDispatch(task, dispatchPayload); } catch (err) { console.warn('[hive] dispatch persist failed:', err); }
+      try { recordDispatch(task, dispatchPayload, activeProjectId()); } catch (err) { console.warn('[hive] dispatch persist failed:', err); }
 
       // Fan-out is fire-and-forget. Workers run in the background, emitting
       // events as they go. We DO NOT await them here, so runTask returns
@@ -253,7 +282,7 @@ export class Orchestrator {
     imageDataUrl: string | undefined,
     model: string | undefined,
   ): Promise<void> {
-    const worktreePath = path.join(process.cwd(), 'worktrees', `wt-${worker.id.slice(1)}`);
+    const worktreePath = workerWorktreePath(worker.id);
     const state = this.reviewState.get(worker.id);
 
     let verdictPass = false;
@@ -366,6 +395,8 @@ export class Orchestrator {
       this.flushBusyQueue();
     }
   }
+
+  inFlightCount(): number { return this.inFlight.size; }
 
   cancelWorker(id: string): boolean {
     const ctrl = this.inFlight.get(id);

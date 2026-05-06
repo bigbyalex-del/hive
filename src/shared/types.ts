@@ -56,6 +56,11 @@ export const IPC = {
   ScaffoldTemplate: 'hive:scaffold-template',
   RunSpecInterview: 'hive:run-spec-interview',
   OverrideReview: 'hive:override-review',
+  ListProjects: 'hive:list-projects',
+  CreateProject: 'hive:create-project',
+  SwitchProject: 'hive:switch-project',
+  GetActiveProject: 'hive:get-active-project',
+  DeleteProject: 'hive:delete-project',
 } as const;
 
 export type AgentEvent =

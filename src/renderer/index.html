@@ -8,7 +8,14 @@
 <body>
 
   <div class="titlebar">
-    <div class="brand">◇ HIVE <span style="color:var(--muted);font-weight:400;">— multi-agent dashboard</span></div>
+    <div class="brand">
+      ◇ HIVE
+      <span class="project-picker" id="project-picker">
+        <span class="project-picker-name" id="project-picker-name">—</span>
+        <span class="project-picker-caret">▾</span>
+      </span>
+      <span style="color:var(--muted);font-weight:400;">— multi-agent dashboard</span>
+    </div>
     <div class="meta">
       task: <b id="meta-task">—</b> &nbsp;·&nbsp;
       runtime <b id="meta-runtime">00:00</b> &nbsp;·&nbsp;
@@ -26,6 +33,17 @@
       <a href="#" id="open-templates" style="color:var(--accent);text-decoration:none;margin-right:10px;">📦 templates</a>
       <a href="#" id="open-settings" style="color:var(--accent);text-decoration:none;">⚙ models</a>
     </div>
+  </div>
+
+  <div id="project-menu" class="project-menu" style="display:none;">
+    <div class="project-menu-header">PROJECTS</div>
+    <div id="project-menu-list" class="project-menu-list"></div>
+    <div class="project-menu-divider"></div>
+    <div class="project-menu-new">
+      <input id="project-new-name" type="text" placeholder="New project name" maxlength="60" />
+      <button id="project-new-btn" type="button">CREATE</button>
+    </div>
+    <div id="project-menu-status" class="project-menu-status"></div>
   </div>
 
   <div id="templates-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:10;align-items:center;justify-content:center;">

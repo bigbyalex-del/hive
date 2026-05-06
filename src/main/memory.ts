@@ -12,6 +12,7 @@
 
 import * as crypto from 'crypto';
 import { insertChunk, loadChunks } from './db';
+import { activeProjectId } from './projectRepo';
 
 const EMBED_MODEL = 'text-embedding-3-small'; // 1536-dim, cheap, high quality
 const EMBED_URL = 'https://api.openai.com/v1/embeddings';
@@ -59,7 +60,7 @@ function cosine(a: number[], b: number[]): number {
 export async function remember(agentId: string, content: string, tag?: string): Promise<number | null> {
   if (!content.trim()) throw new Error('Remember needs non-empty content');
   const vec = await embed(content);
-  return insertChunk({ agentId, tag, content, embedding: vec });
+  return insertChunk({ agentId, tag, content, embedding: vec, projectId: activeProjectId() });
 }
 
 // Per-process dedupe cache: sha256 of (relPath + content). Resets on restart,
@@ -95,9 +96,10 @@ export function autoEmbedWrite(relPath: string, content: string): void {
 
 export async function recall(agentId: string, query: string, limit = 5): Promise<{ tag: string | null; content: string; score: number }[]> {
   if (!query.trim()) throw new Error('Recall needs a non-empty query');
-  // Pull all chunks for this agent + the special 'shared' agent (cross-worker
-  // memory pool). Cosine over them all.
-  const rows = [...loadChunks(agentId), ...loadChunks('shared')];
+  // Pull chunks scoped to the active project: this agent + the cross-worker
+  // 'shared' pool. Cosine over the union.
+  const pid = activeProjectId();
+  const rows = [...loadChunks(agentId, pid), ...loadChunks('shared', pid)];
   if (rows.length === 0) return [];
   const qvec = await embed(query);
   const scored = rows.map(r => ({ tag: r.tag, content: r.content, score: cosine(qvec, r.embedding) }));

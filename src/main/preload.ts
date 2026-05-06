@@ -30,6 +30,11 @@ const IPC = {
   ScaffoldTemplate: 'hive:scaffold-template',
   RunSpecInterview: 'hive:run-spec-interview',
   OverrideReview: 'hive:override-review',
+  ListProjects: 'hive:list-projects',
+  CreateProject: 'hive:create-project',
+  SwitchProject: 'hive:switch-project',
+  GetActiveProject: 'hive:get-active-project',
+  DeleteProject: 'hive:delete-project',
 };
 
 contextBridge.exposeInMainWorld('hive', {
@@ -67,6 +72,11 @@ contextBridge.exposeInMainWorld('hive', {
     ipcRenderer.invoke(IPC.ScaffoldTemplate, { workerId, templateName, projectName }),
   runSpecInterview: (task: string) => ipcRenderer.invoke(IPC.RunSpecInterview, task),
   overrideReview: (workerId: string) => ipcRenderer.invoke(IPC.OverrideReview, workerId),
+  listProjects: () => ipcRenderer.invoke(IPC.ListProjects),
+  createProject: (name: string) => ipcRenderer.invoke(IPC.CreateProject, name),
+  switchProject: (id: number) => ipcRenderer.invoke(IPC.SwitchProject, id),
+  getActiveProject: () => ipcRenderer.invoke(IPC.GetActiveProject),
+  deleteProject: (id: number) => ipcRenderer.invoke(IPC.DeleteProject, id),
   onAgentEvent: (cb: (evt: any) => void) => {
     const listener = (_: Electron.IpcRendererEvent, evt: any) => cb(evt);
     ipcRenderer.on(IPC.AgentEvent, listener);

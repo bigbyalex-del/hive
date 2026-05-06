@@ -86,6 +86,114 @@ function setStatus(id, status) {
   updatePowerLines();
 }
 
+// ---- project picker (titlebar) ----
+const projectPicker = document.getElementById('project-picker');
+const projectPickerName = document.getElementById('project-picker-name');
+const projectMenu = document.getElementById('project-menu');
+const projectMenuList = document.getElementById('project-menu-list');
+const projectMenuStatus = document.getElementById('project-menu-status');
+const projectNewName = document.getElementById('project-new-name');
+const projectNewBtn = document.getElementById('project-new-btn');
+let activeProjectId = null;
+
+function setProjectStatus(msg, isError) {
+  projectMenuStatus.textContent = msg || '';
+  projectMenuStatus.classList.toggle('error', !!isError);
+}
+
+async function refreshProjectMenu() {
+  const res = await window.hive.listProjects();
+  if (!res || !res.ok) { projectMenuList.innerHTML = '<div class="project-menu-status error">failed to load</div>'; return; }
+  activeProjectId = res.activeId;
+  projectMenuList.innerHTML = '';
+  for (const p of res.projects) {
+    const row = document.createElement('div');
+    row.className = 'project-menu-row' + (p.id === activeProjectId ? ' active' : '');
+    row.innerHTML = `<span class="pm-name"></span><span class="pm-delete" title="Delete project history">✕</span>`;
+    row.querySelector('.pm-name').textContent = p.name;
+    row.addEventListener('click', async (e) => {
+      if (e.target.closest('.pm-delete')) return;
+      if (p.id === activeProjectId) { closeProjectMenu(); return; }
+      setProjectStatus('switching…');
+      const r = await window.hive.switchProject(p.id);
+      if (!r.ok) { setProjectStatus(r.error || 'switch failed', true); return; }
+      activeProjectId = p.id;
+      projectPickerName.textContent = p.name;
+      setProjectStatus('');
+      closeProjectMenu();
+      // Reset preview + activity since they belong to the prior project.
+      lastPreviewKey = ''; lastPreviewContent = '';
+      activityPane.innerHTML = '';
+      appendActivity('M', `→ switched to ${p.name}`);
+    });
+    if (p.id !== 1) {
+      row.querySelector('.pm-delete').addEventListener('click', async (ev) => {
+        ev.stopPropagation();
+        if (!confirm(`Delete project "${p.name}"? History + memory will be wiped (files on disk are kept).`)) return;
+        const r = await window.hive.deleteProject(p.id);
+        if (!r.ok) { setProjectStatus(r.error || 'delete failed', true); return; }
+        await refreshProjectMenu();
+      });
+    } else {
+      row.querySelector('.pm-delete').remove(); // can't delete default
+    }
+    projectMenuList.appendChild(row);
+  }
+}
+
+async function refreshActiveProjectName() {
+  const r = await window.hive.getActiveProject();
+  if (r && r.ok && r.project) {
+    projectPickerName.textContent = r.project.name;
+    activeProjectId = r.project.id;
+  } else {
+    projectPickerName.textContent = 'Default';
+  }
+}
+
+function openProjectMenu() {
+  projectMenu.style.display = 'block';
+  refreshProjectMenu();
+  setTimeout(() => projectNewName.focus(), 60);
+}
+function closeProjectMenu() {
+  projectMenu.style.display = 'none';
+  setProjectStatus('');
+  projectNewName.value = '';
+}
+projectPicker.addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (projectMenu.style.display === 'block') closeProjectMenu();
+  else openProjectMenu();
+});
+document.addEventListener('click', (e) => {
+  if (projectMenu.style.display !== 'block') return;
+  if (projectMenu.contains(e.target) || projectPicker.contains(e.target)) return;
+  closeProjectMenu();
+});
+projectNewBtn.addEventListener('click', async () => {
+  const name = projectNewName.value.trim();
+  if (!name) { setProjectStatus('name required', true); return; }
+  setProjectStatus('creating…');
+  const created = await window.hive.createProject(name);
+  if (!created.ok) { setProjectStatus(created.error || 'create failed', true); return; }
+  // Auto-switch to the new project.
+  const sw = await window.hive.switchProject(created.project.id);
+  if (!sw.ok) { setProjectStatus(sw.error || 'switch failed', true); return; }
+  projectPickerName.textContent = created.project.name;
+  activeProjectId = created.project.id;
+  projectNewName.value = '';
+  closeProjectMenu();
+  lastPreviewKey = ''; lastPreviewContent = '';
+  activityPane.innerHTML = '';
+  appendActivity('M', `→ created + switched to ${created.project.name}`);
+});
+projectNewName.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') projectNewBtn.click();
+  if (e.key === 'Escape') closeProjectMenu();
+});
+refreshActiveProjectName();
+
 // ---- theme toggle (Lab default / Premium glass + honeycomb) ----
 (function initTheme() {
   const saved = (() => { try { return localStorage.getItem('hive-theme'); } catch { return null; } })();

@@ -11,7 +11,8 @@ import { speak } from './tts';
 import { loadDefaultMcpServers, shutdownAllMcp } from './mcp';
 import { initDb, shutdownDb } from './db';
 import { listTemplates, scaffoldTemplate } from './templates';
-import { projectDir, commitProjectChanges, ensureProjectRepo, diffWorkerBranch } from './projectRepo';
+import { projectDir, commitProjectChanges, ensureProjectRepo, workerWorktreePath, setActiveProject } from './projectRepo';
+import { listProjects, createProject, getProject, getActiveProjectId, setActiveProjectId, deleteProject } from './db';
 
 dotenv.config({ path: path.join(__dirname, '..', '..', '.env') });
 
@@ -144,6 +145,16 @@ app.whenReady().then(async () => {
   // can restore Manager's dispatch history from disk.
   try { await initDb(); } catch (err) { console.error('[hive] db init failed:', err); }
 
+  // Resolve the active project from the meta table and prime projectRepo so
+  // every workerWorktreePath() / projectDir() call lands on the right place.
+  try {
+    const activeId = getActiveProjectId() ?? 1;
+    const proj = getProject(activeId) ?? getProject(1);
+    if (proj) setActiveProject({ id: proj.id, dir: proj.dir });
+  } catch (err) {
+    console.warn('[hive] active project lookup failed, defaulting:', err);
+  }
+
   createWindow();
 
   // Kick off MCP server connections in the background — workers see new tools
@@ -175,9 +186,7 @@ app.whenReady().then(async () => {
     const path = await import('path');
     // v1.0 — accept 'project' to peek at the merged main branch; W1..W8 still
     // route to per-worker branches for live preview of in-flight work.
-    const dir = workerId === 'project'
-      ? projectDir()
-      : path.join(process.cwd(), 'worktrees', `wt-${workerId.replace(/^W/i, '')}`);
+    const dir = workerId === 'project' ? projectDir() : workerWorktreePath(workerId);
     try {
       const out: { path: string; mtime: number; size: number }[] = [];
       async function walk(d: string, rel = '') {
@@ -203,9 +212,7 @@ app.whenReady().then(async () => {
   ipcMain.handle(IPC.ReadWorktreeFile, async (_e, payload: { workerId: string; path: string }) => {
     const fs = await import('fs/promises');
     const path = await import('path');
-    const dir = payload.workerId === 'project'
-      ? projectDir()
-      : path.join(process.cwd(), 'worktrees', `wt-${payload.workerId.replace(/^W/i, '')}`);
+    const dir = payload.workerId === 'project' ? projectDir() : workerWorktreePath(payload.workerId);
     const abs = path.resolve(dir, payload.path);
     if (!abs.startsWith(path.resolve(dir))) return { ok: false, error: 'path outside worktree' };
     try {
@@ -266,6 +273,62 @@ app.whenReady().then(async () => {
   ipcMain.handle(IPC.OverrideReview, async (_e, workerId: string) => {
     if (!orchestrator) return { ok: false, error: 'no orchestrator' };
     return orchestrator.overrideReview(workerId);
+  });
+
+  ipcMain.handle(IPC.ListProjects, () => {
+    const all = listProjects();
+    const activeId = getActiveProjectId();
+    return { ok: true, projects: all, activeId };
+  });
+  ipcMain.handle(IPC.GetActiveProject, () => {
+    const activeId = getActiveProjectId();
+    if (activeId == null) return { ok: false };
+    const proj = getProject(activeId);
+    return { ok: !!proj, project: proj ?? null };
+  });
+  ipcMain.handle(IPC.CreateProject, async (_e, name: string) => {
+    const trimmed = String(name ?? '').trim();
+    if (!trimmed) return { ok: false, error: 'name required' };
+    if (trimmed.length > 60) return { ok: false, error: 'name too long (max 60 chars)' };
+    // Slug: lowercase alphanum + hyphen, derived from name; uniquify with -2/-3
+    // suffix on collision so two "My App"s don't fight over the same dir.
+    const baseSlug = trimmed.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'project';
+    const existing = new Set(listProjects().map(p => p.slug));
+    let slug = baseSlug;
+    let i = 2;
+    while (existing.has(slug)) { slug = `${baseSlug}-${i++}`; }
+    const dir = `worktrees/projects/${slug}`;
+    try {
+      const fs = await import('fs/promises');
+      await fs.mkdir(path.join(process.cwd(), dir), { recursive: true });
+    } catch (err: any) {
+      return { ok: false, error: `mkdir failed: ${err?.message ?? err}` };
+    }
+    const proj = createProject(trimmed, slug, dir);
+    if (!proj) return { ok: false, error: 'db insert failed' };
+    return { ok: true, project: proj };
+  });
+  ipcMain.handle(IPC.SwitchProject, async (_e, id: number) => {
+    const proj = getProject(id);
+    if (!proj) return { ok: false, error: 'project not found' };
+    // Block flip if workers are still busy — switching mid-flight would
+    // leave the next merge pointing at the wrong repo.
+    if (orchestrator && orchestrator.inFlightCount() > 0) {
+      return { ok: false, error: `cancel ${orchestrator.inFlightCount()} in-flight worker(s) before switching projects` };
+    }
+    setActiveProject({ id: proj.id, dir: proj.dir });
+    setActiveProjectId(proj.id);
+    const res = orchestrator ? await orchestrator.onProjectSwitched() : { ok: true };
+    return { ...res, project: proj };
+  });
+  ipcMain.handle(IPC.DeleteProject, async (_e, id: number) => {
+    if (id === 1) return { ok: false, error: 'cannot delete the default project' };
+    const activeId = getActiveProjectId();
+    if (activeId === id) return { ok: false, error: 'switch to another project first' };
+    const proj = getProject(id);
+    if (!proj) return { ok: false, error: 'project not found' };
+    deleteProject(id);
+    return { ok: true };
   });
   ipcMain.handle(IPC.RunSpecInterview, async (_e, task: string) => {
     if (!orchestrator) return { ok: false, questions: [] };

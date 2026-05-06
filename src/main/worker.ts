@@ -71,11 +71,11 @@ After writing or modifying any HTML file, call BrowserTest on it to verify the p
 Do not ask clarifying questions — make a reasonable interpretation and proceed. Do not over-engineer. Match the scope of the request.`;
 
 export class Worker {
-  private worktreePath: string;
+  // Resolved at every call so a project switch retargets the worker without
+  // having to rebuild the Orchestrator's Worker instances.
+  private get worktreePath(): string { return workerWorktreePath(this.id); }
 
-  constructor(public id: string, private emit: (evt: AgentEvent) => void) {
-    this.worktreePath = workerWorktreePath(id);
-  }
+  constructor(public id: string, private emit: (evt: AgentEvent) => void) {}
 
   // v1.0 Project mode — every dispatch starts on a fresh branch off main.
   // setupWorkerWorktree tears down any prior wt-N, recreates the worker's

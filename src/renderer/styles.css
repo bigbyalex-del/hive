@@ -432,6 +432,115 @@ body.ptype-ios #preview-popout {
   50%      { r: 7; opacity: 0.55; }
 }
 
+/* ---- Project picker (titlebar) ---- */
+.project-picker {
+  display: inline-flex; align-items: center; gap: 4px;
+  margin-left: 12px;
+  padding: 2px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  font-size: 11px;
+  letter-spacing: 0.6px;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+  font-weight: 600;
+  transition: border-color 0.15s, background 0.15s;
+}
+.project-picker:hover { border-color: var(--accent); background: rgba(34,211,238,0.05); }
+.project-picker-caret { color: var(--muted); font-size: 9px; }
+.project-picker-name { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.project-menu {
+  position: fixed;
+  top: 44px;
+  left: 22px;
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  min-width: 280px;
+  max-width: 360px;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.5);
+  z-index: 20;
+  font-size: 12px;
+  overflow: hidden;
+}
+.project-menu-header {
+  padding: 8px 12px 4px;
+  font-size: 10px;
+  letter-spacing: 1.2px;
+  color: var(--muted);
+}
+.project-menu-list { max-height: 280px; overflow: auto; padding: 4px 0; }
+.project-menu-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 6px 12px;
+  cursor: pointer;
+  color: var(--text);
+}
+.project-menu-row:hover { background: rgba(34,211,238,0.06); }
+.project-menu-row.active { color: var(--accent); }
+.project-menu-row.active::before { content: '● '; }
+.project-menu-row .pm-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-menu-row .pm-delete {
+  color: var(--dim); font-size: 11px;
+  margin-left: 8px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s;
+}
+.project-menu-row:hover .pm-delete { opacity: 1; }
+.project-menu-row .pm-delete:hover { color: var(--error); }
+.project-menu-divider { height: 1px; background: var(--border); margin: 4px 0; }
+.project-menu-new {
+  display: flex; gap: 6px;
+  padding: 8px 12px 10px;
+}
+.project-menu-new input {
+  flex: 1;
+  background: var(--panel-2);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  padding: 4px 8px;
+  border-radius: 3px;
+  font-family: inherit;
+  font-size: 12px;
+  outline: none;
+}
+.project-menu-new input:focus { border-color: var(--accent); }
+.project-menu-new button {
+  background: var(--accent);
+  border: 0;
+  color: #00171f;
+  font-family: inherit;
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 1px;
+  padding: 4px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.project-menu-status {
+  font-size: 10px;
+  color: var(--muted);
+  padding: 0 12px 8px;
+  min-height: 14px;
+}
+.project-menu-status.error { color: var(--error); }
+
+/* Premium-theme tweaks for the project picker so it doesn't break the glass aesthetic */
+body.theme-premium .project-picker {
+  background: rgba(17,24,33,0.55);
+  backdrop-filter: blur(8px);
+  border-color: rgba(43,58,77,0.6);
+}
+body.theme-premium .project-picker:hover { border-color: var(--honey); background: rgba(251,191,36,0.06); }
+body.theme-premium .project-menu {
+  background: rgba(17,24,33,0.92);
+  border-color: rgba(43,58,77,0.7);
+  backdrop-filter: blur(14px);
+}
+
 /* ---- Theme toggle (titlebar segmented control) ---- */
 .theme-toggle {
   display: inline-flex;

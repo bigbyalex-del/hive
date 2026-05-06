@@ -87,9 +87,55 @@ export async function initDb(): Promise<void> {
       embedding TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_chunks_agent ON chunks(agent_id);
+
+    CREATE TABLE IF NOT EXISTS projects (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      slug TEXT UNIQUE NOT NULL,
+      name TEXT NOT NULL,
+      dir TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      last_used INTEGER NOT NULL
+    );
   `);
 
+  // Lightweight migrations — sql.js doesn't fail on duplicate ALTER, but we
+  // gate via a column-existence check so old DBs gain project_id without
+  // breaking new ones.
+  ensureColumn('dispatches', 'project_id', 'INTEGER');
+  ensureColumn('runs', 'project_id', 'INTEGER');
+  ensureColumn('chunks', 'project_id', 'INTEGER');
+
+  // Seed a default project the first time we boot. The existing
+  // worktrees/project/ directory becomes project #1 so prior history doesn't
+  // strand. Subsequent projects live at worktrees/projects/<slug>/.
+  const existing = db.exec('SELECT COUNT(*) FROM projects')[0]?.values?.[0]?.[0] ?? 0;
+  if (existing === 0) {
+    const ts = Date.now();
+    const stmt = db.prepare('INSERT INTO projects (slug, name, dir, created_at, last_used) VALUES (?, ?, ?, ?, ?)');
+    stmt.run(['default', 'Default', 'worktrees/project', ts, ts]);
+    stmt.free();
+    // Backfill project_id=1 on any pre-existing rows so memory + history
+    // remain visible after the migration.
+    db.run('UPDATE dispatches SET project_id = 1 WHERE project_id IS NULL');
+    db.run('UPDATE runs SET project_id = 1 WHERE project_id IS NULL');
+    db.run('UPDATE chunks SET project_id = 1 WHERE project_id IS NULL');
+    db.run("INSERT OR REPLACE INTO meta (key, value) VALUES ('active_project_id', '1')");
+  }
+
   console.log(`[hive] db ready at ${file}`);
+}
+
+function ensureColumn(table: string, column: string, type: string): void {
+  if (!db) return;
+  try {
+    const info = db.exec(`PRAGMA table_info(${table})`);
+    const cols = info[0]?.values?.map((r: any[]) => r[1]) ?? [];
+    if (!cols.includes(column)) {
+      db.run(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+    }
+  } catch (err) {
+    console.warn(`[hive] ensureColumn ${table}.${column} failed:`, err);
+  }
 }
 
 function scheduleSave() {
@@ -107,11 +153,11 @@ export function persistNow(): void {
   }
 }
 
-export function recordDispatch(userInput: string, subtasks: { task: string; model?: string }[]): number | null {
+export function recordDispatch(userInput: string, subtasks: { task: string; model?: string }[], projectId?: number | null): number | null {
   if (!db) return null;
   const ts = Date.now();
-  const stmt = db.prepare('INSERT INTO dispatches (ts, user_input, subtasks_json) VALUES (?, ?, ?)');
-  stmt.run([ts, userInput, JSON.stringify(subtasks)]);
+  const stmt = db.prepare('INSERT INTO dispatches (ts, user_input, subtasks_json, project_id) VALUES (?, ?, ?, ?)');
+  stmt.run([ts, userInput, JSON.stringify(subtasks), projectId ?? null]);
   stmt.free();
   const idResult = db.exec('SELECT last_insert_rowid() AS id');
   const id = idResult[0]?.values?.[0]?.[0] as number | undefined;
@@ -147,9 +193,20 @@ export function recordRun(opts: {
   scheduleSave();
 }
 
-export function loadRecentDispatches(limit = 20): { userInput: string; subtasks: { task: string; model?: string }[]; timestamp: number }[] {
+export function loadRecentDispatches(limit = 20, projectId?: number | null): { userInput: string; subtasks: { task: string; model?: string }[]; timestamp: number }[] {
   if (!db) return [];
-  const result = db.exec(`SELECT ts, user_input, subtasks_json FROM dispatches ORDER BY ts DESC LIMIT ${limit}`);
+  let result;
+  if (projectId == null) {
+    result = db.exec(`SELECT ts, user_input, subtasks_json FROM dispatches ORDER BY ts DESC LIMIT ${limit}`);
+  } else {
+    const stmt = db.prepare('SELECT ts, user_input, subtasks_json FROM dispatches WHERE project_id = ? ORDER BY ts DESC LIMIT ?');
+    stmt.bind([projectId, limit]);
+    const rows: any[] = [];
+    while (stmt.step()) rows.push(stmt.get());
+    stmt.free();
+    if (rows.length === 0) return [];
+    return rows.map(r => ({ timestamp: r[0], userInput: r[1], subtasks: JSON.parse(r[2]) })).reverse();
+  }
   if (!result.length) return [];
   return result[0].values
     .map((row: any[]) => ({
@@ -172,10 +229,10 @@ export function getTotalTokens(): { input: number; output: number; cost: number 
   };
 }
 
-export function insertChunk(opts: { agentId: string; tag?: string; content: string; embedding: number[] }): number | null {
+export function insertChunk(opts: { agentId: string; tag?: string; content: string; embedding: number[]; projectId?: number | null }): number | null {
   if (!db) return null;
-  const stmt = db.prepare('INSERT INTO chunks (ts, agent_id, tag, content, embedding) VALUES (?, ?, ?, ?, ?)');
-  stmt.run([Date.now(), opts.agentId, opts.tag ?? null, opts.content, JSON.stringify(opts.embedding)]);
+  const stmt = db.prepare('INSERT INTO chunks (ts, agent_id, tag, content, embedding, project_id) VALUES (?, ?, ?, ?, ?, ?)');
+  stmt.run([Date.now(), opts.agentId, opts.tag ?? null, opts.content, JSON.stringify(opts.embedding), opts.projectId ?? null]);
   stmt.free();
   const r = db.exec('SELECT last_insert_rowid() AS id');
   const id = r[0]?.values?.[0]?.[0] as number | undefined;
@@ -183,10 +240,12 @@ export function insertChunk(opts: { agentId: string; tag?: string; content: stri
   return typeof id === 'number' ? id : null;
 }
 
-export function loadChunks(agentId: string): { id: number; tag: string | null; content: string; embedding: number[] }[] {
+export function loadChunks(agentId: string, projectId?: number | null): { id: number; tag: string | null; content: string; embedding: number[] }[] {
   if (!db) return [];
-  const stmt = db.prepare('SELECT id, tag, content, embedding FROM chunks WHERE agent_id = ?');
-  stmt.bind([agentId]);
+  const stmt = projectId == null
+    ? db.prepare('SELECT id, tag, content, embedding FROM chunks WHERE agent_id = ?')
+    : db.prepare('SELECT id, tag, content, embedding FROM chunks WHERE agent_id = ? AND project_id = ?');
+  if (projectId == null) stmt.bind([agentId]); else stmt.bind([agentId, projectId]);
   const out: any[] = [];
   while (stmt.step()) {
     const row = stmt.get();
@@ -194,6 +253,83 @@ export function loadChunks(agentId: string): { id: number; tag: string | null; c
   }
   stmt.free();
   return out;
+}
+
+// ---- Projects ---------------------------------------------------------
+
+export interface ProjectRow {
+  id: number;
+  slug: string;
+  name: string;
+  dir: string;
+  createdAt: number;
+  lastUsed: number;
+}
+
+export function listProjects(): ProjectRow[] {
+  if (!db) return [];
+  const r = db.exec('SELECT id, slug, name, dir, created_at, last_used FROM projects ORDER BY last_used DESC');
+  if (!r.length) return [];
+  return r[0].values.map((row: any[]) => ({
+    id: row[0], slug: row[1], name: row[2], dir: row[3], createdAt: row[4], lastUsed: row[5],
+  }));
+}
+
+export function getProject(id: number): ProjectRow | null {
+  if (!db) return null;
+  const stmt = db.prepare('SELECT id, slug, name, dir, created_at, last_used FROM projects WHERE id = ?');
+  stmt.bind([id]);
+  if (!stmt.step()) { stmt.free(); return null; }
+  const row = stmt.get();
+  stmt.free();
+  return { id: row[0] as number, slug: row[1] as string, name: row[2] as string, dir: row[3] as string, createdAt: row[4] as number, lastUsed: row[5] as number };
+}
+
+export function createProject(name: string, slug: string, dir: string): ProjectRow | null {
+  if (!db) return null;
+  const ts = Date.now();
+  const stmt = db.prepare('INSERT INTO projects (slug, name, dir, created_at, last_used) VALUES (?, ?, ?, ?, ?)');
+  stmt.run([slug, name, dir, ts, ts]);
+  stmt.free();
+  const idR = db.exec('SELECT last_insert_rowid()');
+  const id = idR[0]?.values?.[0]?.[0] as number | undefined;
+  scheduleSave();
+  return id ? { id, slug, name, dir, createdAt: ts, lastUsed: ts } : null;
+}
+
+export function deleteProject(id: number): void {
+  if (!db) return;
+  // Cascade: drop the project's history + memory. The on-disk dir is left
+  // alone — caller decides whether to rm it.
+  const a = db.prepare('DELETE FROM dispatches WHERE project_id = ?'); a.bind([id]); a.step(); a.free();
+  const b = db.prepare('DELETE FROM runs WHERE project_id = ?'); b.bind([id]); b.step(); b.free();
+  const c = db.prepare('DELETE FROM chunks WHERE project_id = ?'); c.bind([id]); c.step(); c.free();
+  const d = db.prepare('DELETE FROM projects WHERE id = ?'); d.bind([id]); d.step(); d.free();
+  scheduleSave();
+}
+
+export function touchProject(id: number): void {
+  if (!db) return;
+  const stmt = db.prepare('UPDATE projects SET last_used = ? WHERE id = ?');
+  stmt.run([Date.now(), id]);
+  stmt.free();
+  scheduleSave();
+}
+
+export function getActiveProjectId(): number | null {
+  if (!db) return null;
+  const r = db.exec("SELECT value FROM meta WHERE key = 'active_project_id'");
+  const v = r[0]?.values?.[0]?.[0];
+  const n = typeof v === 'string' ? parseInt(v, 10) : (typeof v === 'number' ? v : NaN);
+  return Number.isFinite(n) ? n : null;
+}
+
+export function setActiveProjectId(id: number): void {
+  if (!db) return;
+  const stmt = db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('active_project_id', ?)");
+  stmt.run([String(id)]);
+  stmt.free();
+  touchProject(id);
 }
 
 export function shutdownDb(): void {

@@ -1,17 +1,32 @@
-// v1.0 Project mode — one parent repo at worktrees/project/, each worker
-// dispatches into a real `git worktree` on its own branch (worker-1..worker-8).
-// On Reviewer PASS, orchestrator commits the worker's changes and merges the
-// branch back into main. Conflicts surface as a 'review' status with a
-// "merge conflict" log line — manual resolution for now.
+// v1.0 Project mode — one parent repo per project at worktrees/projects/<slug>,
+// each worker dispatches into a real `git worktree` under that project on its
+// own branch (worker-1..worker-8). Switching the active project changes the
+// path returned by projectDir() / workerWorktreePath() so subsequent dispatches
+// land in the new project's tree.
+//
+// The legacy "default" project lives at worktrees/project/ for backward
+// compatibility with pre-projects history.
 
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import { spawn } from 'child_process';
 
-const PROJECT_DIR = path.join(process.cwd(), 'worktrees', 'project');
+// Active project state — driven by setActiveProject() at app start and on
+// user-initiated project switch. We keep both `dir` (relative to cwd, taken
+// straight from the projects table) and the resolved absolute path so callers
+// don't have to know the layout.
+interface ActiveProject { id: number; dir: string; absDir: string; }
+let active: ActiveProject = {
+  id: 1,
+  dir: 'worktrees/project',
+  absDir: path.join(process.cwd(), 'worktrees', 'project'),
+};
 
-let initialised = false;
-// Serialise all ops that touch the parent repo — branch create, merge, etc.
+// Per-project init guard — when we switch projects, the new one needs its
+// own ensureProjectRepo() pass before workers fan out.
+const initialisedProjects = new Set<number>();
+
+// Serialise all ops that touch any parent repo — branch create, merge, etc.
 // Worker working-tree edits are isolated by directory so they don't need this.
 let repoMutex: Promise<void> = Promise.resolve();
 async function withMutex<T>(fn: () => Promise<T>): Promise<T> {
@@ -26,11 +41,26 @@ async function withMutex<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-export function projectDir(): string { return PROJECT_DIR; }
+export function setActiveProject(opts: { id: number; dir: string }): void {
+  active = {
+    id: opts.id,
+    dir: opts.dir,
+    absDir: path.isAbsolute(opts.dir) ? opts.dir : path.join(process.cwd(), opts.dir),
+  };
+}
+
+export function activeProjectId(): number { return active.id; }
+export function projectDir(): string { return active.absDir; }
 
 export function workerWorktreePath(workerId: string): string {
   const idx = workerId.replace(/^W/i, '');
-  return path.join(process.cwd(), 'worktrees', `wt-${idx}`);
+  // Per-project worker dirs live under the project's _workers/ folder so two
+  // projects don't collide on wt-N. The legacy default project keeps its
+  // historic top-level wt-N layout so existing on-disk worktrees still work.
+  if (active.id === 1) {
+    return path.join(process.cwd(), 'worktrees', `wt-${idx}`);
+  }
+  return path.join(active.absDir, '_workers', `wt-${idx}`);
 }
 
 export function workerBranch(workerId: string): string {
@@ -64,52 +94,44 @@ async function exists(p: string): Promise<boolean> {
   try { await fs.access(p); return true; } catch { return false; }
 }
 
-// Idempotent. Creates worktrees/project/ if missing, inits as a git repo with
-// an empty initial commit on main so worker branches can be created off it.
+const GITIGNORE = [
+  'node_modules/',
+  '.hive-screenshots/',
+  '_test_*.png',
+  '_screenshot.png',
+  '_workers/',
+  '.DS_Store',
+  'Thumbs.db',
+  '',
+].join('\n');
+
+// Idempotent. Creates the active project's repo directory if missing, inits
+// it as a git repo with an empty initial commit on main so worker branches
+// can be created off it. Per-project guard so a switch triggers re-init.
 export async function ensureProjectRepo(): Promise<void> {
-  if (initialised) return;
-  await fs.mkdir(PROJECT_DIR, { recursive: true });
-  const isRepo = await exists(path.join(PROJECT_DIR, '.git'));
+  const id = active.id;
+  if (initialisedProjects.has(id)) return;
+  const dir = active.absDir;
+  await fs.mkdir(dir, { recursive: true });
+  const isRepo = await exists(path.join(dir, '.git'));
   if (!isRepo) {
-    await run(PROJECT_DIR, ['init', '-b', 'main']);
-    await run(PROJECT_DIR, ['config', 'user.email', 'hive@youraihive.com']);
-    await run(PROJECT_DIR, ['config', 'user.name', 'Hive']);
-    // Defensive .gitignore so postInstall artifacts (node_modules), worker
-    // test screenshots, and OS noise never leak into commits or merges.
-    const gitignore = [
-      'node_modules/',
-      '.hive-screenshots/',
-      '_test_*.png',
-      '_screenshot.png',
-      '.DS_Store',
-      'Thumbs.db',
-      '',
-    ].join('\n');
-    await fs.writeFile(path.join(PROJECT_DIR, '.gitignore'), gitignore, 'utf8');
-    await run(PROJECT_DIR, ['add', '.gitignore']);
-    await run(PROJECT_DIR, ['commit', '-m', 'init']);
+    await run(dir, ['init', '-b', 'main']);
+    await run(dir, ['config', 'user.email', 'hive@youraihive.com']);
+    await run(dir, ['config', 'user.name', 'Hive']);
+    await fs.writeFile(path.join(dir, '.gitignore'), GITIGNORE, 'utf8');
+    await run(dir, ['add', '.gitignore']);
+    await run(dir, ['commit', '-m', 'init']);
   } else {
-    // Make sure config is set even on existing repos (recovery path).
-    await run(PROJECT_DIR, ['config', 'user.email', 'hive@youraihive.com']).catch(() => {});
-    await run(PROJECT_DIR, ['config', 'user.name', 'Hive']).catch(() => {});
-    // Ensure .gitignore exists on pre-existing repos that pre-date v1.0.1.
-    const gi = path.join(PROJECT_DIR, '.gitignore');
+    await run(dir, ['config', 'user.email', 'hive@youraihive.com']).catch(() => {});
+    await run(dir, ['config', 'user.name', 'Hive']).catch(() => {});
+    const gi = path.join(dir, '.gitignore');
     if (!await exists(gi)) {
-      const gitignore = [
-        'node_modules/',
-        '.hive-screenshots/',
-        '_test_*.png',
-        '_screenshot.png',
-        '.DS_Store',
-        'Thumbs.db',
-        '',
-      ].join('\n');
-      await fs.writeFile(gi, gitignore, 'utf8');
-      await run(PROJECT_DIR, ['add', '.gitignore'], { ignoreExit: true });
-      await run(PROJECT_DIR, ['commit', '-m', 'add .gitignore'], { ignoreExit: true });
+      await fs.writeFile(gi, GITIGNORE, 'utf8');
+      await run(dir, ['add', '.gitignore'], { ignoreExit: true });
+      await run(dir, ['commit', '-m', 'add .gitignore'], { ignoreExit: true });
     }
   }
-  initialised = true;
+  initialisedProjects.add(id);
 }
 
 // Tear down any existing worktree at wt-N, force-recreate the worker's branch
@@ -121,14 +143,14 @@ export async function setupWorkerWorktree(workerId: string): Promise<string> {
 
   return withMutex(async () => {
     // Remove any prior worktree registration. Ignore failure — wt may not exist.
-    await run(PROJECT_DIR, ['worktree', 'remove', wtPath, '--force'], { ignoreExit: true });
+    await run(active.absDir, ['worktree', 'remove', wtPath, '--force'], { ignoreExit: true });
     // Belt-and-braces: physically delete the directory in case worktree remove
     // didn't (e.g. git lost track of it).
     await fs.rm(wtPath, { recursive: true, force: true }).catch(() => {});
     // Drop the old branch if it exists so we always start from current main.
-    await run(PROJECT_DIR, ['branch', '-D', branch], { ignoreExit: true });
+    await run(active.absDir, ['branch', '-D', branch], { ignoreExit: true });
     // Create branch + add worktree atomically.
-    await run(PROJECT_DIR, ['worktree', 'add', '-b', branch, wtPath, 'main']);
+    await run(active.absDir, ['worktree', 'add', '-b', branch, wtPath, 'main']);
     return wtPath;
   });
 }
@@ -162,28 +184,28 @@ export async function mergeWorkerBranch(workerId: string, summary: string): Prom
 
   return withMutex<MergeResult>(async () => {
     // Confirm branch exists.
-    const branchCheck = await run(PROJECT_DIR, ['rev-parse', '--verify', branch], { ignoreExit: true });
+    const branchCheck = await run(active.absDir, ['rev-parse', '--verify', branch], { ignoreExit: true });
     if (branchCheck.code !== 0) return { ok: false, error: `branch ${branch} does not exist` };
 
     // Fast path: no commits ahead of main → nothing to merge.
-    const ahead = await run(PROJECT_DIR, ['rev-list', '--count', `main..${branch}`], { ignoreExit: true });
+    const ahead = await run(active.absDir, ['rev-list', '--count', `main..${branch}`], { ignoreExit: true });
     if (ahead.stdout.trim() === '0') return { ok: true, alreadyMerged: true };
 
     const trimmed = summary.length > 160 ? summary.slice(0, 157) + '…' : summary;
     const merge = await run(
-      PROJECT_DIR,
+      active.absDir,
       ['merge', '--no-ff', '-m', `Merge ${branch}: ${trimmed}`, branch],
       { ignoreExit: true },
     );
     if (merge.code === 0) return { ok: true };
 
     // Conflict — read conflicted files, abort the merge to leave main clean.
-    const status = await run(PROJECT_DIR, ['status', '--porcelain'], { ignoreExit: true });
+    const status = await run(active.absDir, ['status', '--porcelain'], { ignoreExit: true });
     const conflicted = status.stdout.split('\n')
       .filter(l => l.startsWith('UU') || l.startsWith('AA') || l.startsWith('DD'))
       .map(l => l.slice(3).trim())
       .filter(Boolean);
-    await run(PROJECT_DIR, ['merge', '--abort'], { ignoreExit: true });
+    await run(active.absDir, ['merge', '--abort'], { ignoreExit: true });
     return { ok: false, conflict: conflicted, error: 'merge conflict' };
   });
 }
@@ -193,10 +215,10 @@ export async function mergeWorkerBranch(workerId: string, summary: string): Prom
 export async function diffWorkerBranch(workerId: string): Promise<{ stat: string; patch: string }> {
   await ensureProjectRepo();
   const branch = workerBranch(workerId);
-  const exists = await run(PROJECT_DIR, ['rev-parse', '--verify', branch], { ignoreExit: true });
+  const exists = await run(active.absDir, ['rev-parse', '--verify', branch], { ignoreExit: true });
   if (exists.code !== 0) return { stat: '', patch: '' };
-  const stat = await run(PROJECT_DIR, ['diff', `main...${branch}`, '--stat'], { ignoreExit: true });
-  const patch = await run(PROJECT_DIR, ['diff', `main...${branch}`], { ignoreExit: true });
+  const stat = await run(active.absDir, ['diff', `main...${branch}`, '--stat'], { ignoreExit: true });
+  const patch = await run(active.absDir, ['diff', `main...${branch}`], { ignoreExit: true });
   return { stat: stat.stdout, patch: patch.stdout };
 }
 
@@ -205,11 +227,11 @@ export async function diffWorkerBranch(workerId: string): Promise<{ stat: string
 export async function commitProjectChanges(message: string): Promise<boolean> {
   await ensureProjectRepo();
   return withMutex(async () => {
-    const status = await run(PROJECT_DIR, ['status', '--porcelain'], { ignoreExit: true });
+    const status = await run(active.absDir, ['status', '--porcelain'], { ignoreExit: true });
     if (!status.stdout.trim()) return false;
-    await run(PROJECT_DIR, ['add', '-A']);
+    await run(active.absDir, ['add', '-A']);
     const trimmed = message.length > 160 ? message.slice(0, 157) + '…' : message;
-    await run(PROJECT_DIR, ['commit', '-m', trimmed]);
+    await run(active.absDir, ['commit', '-m', trimmed]);
     return true;
   });
 }
