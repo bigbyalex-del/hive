@@ -4,7 +4,9 @@ import { AgentEvent } from '../shared/types';
 import { getProvider } from './providers/registry';
 import { getAgentConfig } from './config';
 import { ProviderName } from './providers/types';
-import { setupWorkerWorktree, workerWorktreePath } from './projectRepo';
+import { setupWorkerWorktree, workerWorktreePath, activeProjectId } from './projectRepo';
+import { costGBP } from './pricing';
+import { recordRun } from './db';
 
 // Manager addresses models by alias (haiku/sonnet/opus). Workers translate the
 // alias into a concrete model id matching their configured provider.
@@ -76,6 +78,26 @@ export class Worker {
   private get worktreePath(): string { return workerWorktreePath(this.id); }
 
   constructor(public id: string, private emit: (evt: AgentEvent) => void) {}
+
+  // Emit the cost event AND persist a runs row so per-project totals survive
+  // restart. Done in one place so Reviewer + Manager can call it too.
+  private emitCost(model: string, inputTokens: number, outputTokens: number, status: 'done' | 'error' | 'cancelled'): void {
+    const deltaGBP = costGBP(model, inputTokens, outputTokens);
+    this.emit({ type: 'cost', id: this.id, deltaGBP, model, inputTokens, outputTokens });
+    try {
+      recordRun({
+        dispatchId: null,
+        agentId: this.id,
+        model,
+        inputTokens,
+        outputTokens,
+        status,
+        projectId: activeProjectId(),
+      });
+    } catch (err) {
+      console.warn('[hive] recordRun failed:', err);
+    }
+  }
 
   // v1.0 Project mode — every dispatch starts on a fresh branch off main.
   // setupWorkerWorktree tears down any prior wt-N, recreates the worker's
@@ -167,6 +189,7 @@ export class Worker {
       } as any, events);
 
       clearTimeout(timeout);
+      this.emitCost(model, result.inputTokens, result.outputTokens, 'done');
       this.emit({ type: 'log', id: this.id, line: `✓ ${result.text.slice(0, 80)}` });
       this.emit({ type: 'status', id: this.id, status: 'done' });
     } catch (err: any) {

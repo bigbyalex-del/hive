@@ -35,6 +35,12 @@ const IPC = {
   SwitchProject: 'hive:switch-project',
   GetActiveProject: 'hive:get-active-project',
   DeleteProject: 'hive:delete-project',
+  GetCostSummary: 'hive:get-cost-summary',
+  GetWorkerDiff: 'hive:get-worker-diff',
+  BabysitStart: 'hive:babysit-start',
+  BabysitStop: 'hive:babysit-stop',
+  BabysitStatus: 'hive:babysit-status',
+  BabysitLog: 'hive:babysit-log',
 };
 
 contextBridge.exposeInMainWorld('hive', {
@@ -73,10 +79,20 @@ contextBridge.exposeInMainWorld('hive', {
   runSpecInterview: (task: string) => ipcRenderer.invoke(IPC.RunSpecInterview, task),
   overrideReview: (workerId: string) => ipcRenderer.invoke(IPC.OverrideReview, workerId),
   listProjects: () => ipcRenderer.invoke(IPC.ListProjects),
-  createProject: (name: string) => ipcRenderer.invoke(IPC.CreateProject, name),
   switchProject: (id: number) => ipcRenderer.invoke(IPC.SwitchProject, id),
   getActiveProject: () => ipcRenderer.invoke(IPC.GetActiveProject),
   deleteProject: (id: number) => ipcRenderer.invoke(IPC.DeleteProject, id),
+  getCostSummary: (projectId?: number) => ipcRenderer.invoke(IPC.GetCostSummary, projectId ?? null),
+  getWorkerDiff: (workerId: string) => ipcRenderer.invoke(IPC.GetWorkerDiff, workerId),
+  createProject: (input: string | { name: string; gitUrl?: string }) => ipcRenderer.invoke(IPC.CreateProject, input),
+  babysitStart: (cfg: any) => ipcRenderer.invoke(IPC.BabysitStart, cfg),
+  babysitStop: () => ipcRenderer.invoke(IPC.BabysitStop),
+  babysitStatus: () => ipcRenderer.invoke(IPC.BabysitStatus),
+  onBabysitLog: (cb: (line: string) => void) => {
+    const listener = (_: Electron.IpcRendererEvent, line: string) => cb(line);
+    ipcRenderer.on(IPC.BabysitLog, listener);
+    return () => ipcRenderer.removeListener(IPC.BabysitLog, listener);
+  },
   onAgentEvent: (cb: (evt: any) => void) => {
     const listener = (_: Electron.IpcRendererEvent, evt: any) => cb(evt);
     ipcRenderer.on(IPC.AgentEvent, listener);

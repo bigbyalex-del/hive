@@ -1,6 +1,9 @@
 import { AgentEvent } from '../shared/types';
 import { getProvider } from './providers/registry';
 import { getAgentConfig } from './config';
+import { costGBP } from './pricing';
+import { recordRun } from './db';
+import { activeProjectId } from './projectRepo';
 
 const SYSTEM = `You are the Manager of HIVE, a multi-agent app-building system. You never edit code. Your job: route user input AND pick the right AI model for each subtask.
 
@@ -81,6 +84,13 @@ export class Manager {
         maxTurns: 1,
         noTools: true, // Manager is pure routing — never call MCP/file tools
       }, events);
+
+      // Persist + emit cost so the titlebar £ totals stay accurate.
+      const deltaGBP = costGBP(cfg.model, result.inputTokens, result.outputTokens);
+      this.emit({ type: 'cost', id: this.id, deltaGBP, model: cfg.model, inputTokens: result.inputTokens, outputTokens: result.outputTokens });
+      try {
+        recordRun({ dispatchId: null, agentId: this.id, model: cfg.model, inputTokens: result.inputTokens, outputTokens: result.outputTokens, status: 'done', projectId: activeProjectId() });
+      } catch { /* persist failure must not break Manager */ }
 
       const raw = result.text.trim();
 
@@ -174,6 +184,12 @@ If the task is already specified clearly enough that no questions are needed, re
         onError: (err: Error) => this.emit({ type: 'log', id: this.id, line: `✗ ${err.message}` }),
         _tokenDelta: (delta: number) => this.emit({ type: 'tokens', id: this.id, delta }),
       } as any);
+
+      const deltaGBP = costGBP(cfg.model, result.inputTokens, result.outputTokens);
+      this.emit({ type: 'cost', id: this.id, deltaGBP, model: cfg.model, inputTokens: result.inputTokens, outputTokens: result.outputTokens });
+      try {
+        recordRun({ dispatchId: null, agentId: this.id, model: cfg.model, inputTokens: result.inputTokens, outputTokens: result.outputTokens, status: 'done', projectId: activeProjectId() });
+      } catch { /* persist failure must not break interview */ }
 
       const raw = result.text.trim();
       this.emit({ type: 'status', id: this.id, status: 'done' });

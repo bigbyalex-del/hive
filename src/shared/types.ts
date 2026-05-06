@@ -61,6 +61,12 @@ export const IPC = {
   SwitchProject: 'hive:switch-project',
   GetActiveProject: 'hive:get-active-project',
   DeleteProject: 'hive:delete-project',
+  GetCostSummary: 'hive:get-cost-summary',
+  GetWorkerDiff: 'hive:get-worker-diff',
+  BabysitStart: 'hive:babysit-start',
+  BabysitStop: 'hive:babysit-stop',
+  BabysitStatus: 'hive:babysit-status',
+  BabysitLog: 'hive:babysit-log',
 } as const;
 
 export type AgentEvent =
@@ -68,4 +74,5 @@ export type AgentEvent =
   | { type: 'task'; id: string; task: string | null }
   | { type: 'log'; id: string; line: string }
   | { type: 'tokens'; id: string; delta: number }
+  | { type: 'cost'; id: string; deltaGBP: number; model: string; inputTokens: number; outputTokens: number }
   | { type: 'role'; id: string; role: AgentRole };

@@ -24,6 +24,7 @@ for (const a of AGENTS) {
     <div class="head">
       <div class="id">${isManager ? '◆ MANAGER' : a.id}<span class="tag">${isManager ? 'orchestrator' : 'worker'}</span></div>
       <div style="display:flex;align-items:center;gap:6px;">
+        ${isManager ? '' : `<a href="#" class="diff-btn" data-id="${a.id}" style="display:none;color:var(--muted);font-size:11px;text-decoration:none;" title="Show patch for this worker's branch">diff</a>`}
         ${isManager ? '' : `<a href="#" class="cancel-btn" data-id="${a.id}" style="display:none;color:var(--error);font-size:11px;text-decoration:none;">⏹ cancel</a>`}
         ${isManager ? '' : `<a href="#" class="override-btn" data-id="${a.id}" style="display:none;color:var(--accent,#7CFFB2);font-size:11px;text-decoration:none;" title="Force-merge despite reviewer NEEDS_FIX">✓ force merge</a>`}
         <div class="status s-idle"><span class="dot"></span><span class="status-text">idle</span></div>
@@ -43,6 +44,7 @@ for (const a of AGENTS) {
     tokensEl: cell.querySelector('.tokens'),
     cancelEl: cell.querySelector('.cancel-btn'),
     overrideEl: cell.querySelector('.override-btn'),
+    diffEl: cell.querySelector('.diff-btn'),
     log: [],
     tokens: 0,
     status: 'idle',
@@ -70,6 +72,13 @@ for (const a of AGENTS) {
       }
     });
   }
+  const diffBtn = cell.querySelector('.diff-btn');
+  if (diffBtn) {
+    diffBtn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      openDiffModal(a.id);
+    });
+  }
 }
 
 function setStatus(id, status) {
@@ -83,6 +92,9 @@ function setStatus(id, status) {
   c.el.classList.add('cell-' + status);
   if (c.cancelEl) c.cancelEl.style.display = status === 'working' ? 'inline' : 'none';
   if (c.overrideEl) c.overrideEl.style.display = status === 'review' ? 'inline' : 'none';
+  // Diff link is meaningful any time the worker has produced changes — show
+  // for anything except idle (when the branch wouldn't exist yet).
+  if (c.diffEl) c.diffEl.style.display = (status === 'done' || status === 'review' || status === 'error') ? 'inline' : 'none';
   updatePowerLines();
 }
 
@@ -173,9 +185,11 @@ document.addEventListener('click', (e) => {
 });
 projectNewBtn.addEventListener('click', async () => {
   const name = projectNewName.value.trim();
+  const gitUrl = (document.getElementById('project-new-git')?.value || '').trim();
   if (!name) { setProjectStatus('name required', true); return; }
-  setProjectStatus('creating…');
-  const created = await window.hive.createProject(name);
+  setProjectStatus(gitUrl ? 'cloning…' : 'creating…');
+  const payload = gitUrl ? { name, gitUrl } : name;
+  const created = await window.hive.createProject(payload);
   if (!created.ok) { setProjectStatus(created.error || 'create failed', true); return; }
   // Auto-switch to the new project.
   const sw = await window.hive.switchProject(created.project.id);
@@ -478,6 +492,8 @@ async function refreshPreview() {
 
 // ---- live event subscription ----
 let totalTokens = 0;
+let totalCostGBP = 0;
+const metaCostEl = document.getElementById('meta-cost');
 window.hive.onAgentEvent((evt) => {
   if (evt.type === 'status') setStatus(evt.id, evt.status);
   else if (evt.type === 'task') {
@@ -493,7 +509,124 @@ window.hive.onAgentEvent((evt) => {
     totalTokens += evt.delta;
     document.getElementById('meta-tokens').textContent = totalTokens.toLocaleString();
   }
+  else if (evt.type === 'cost') {
+    totalCostGBP += evt.deltaGBP;
+    if (metaCostEl) metaCostEl.textContent = totalCostGBP < 0.01 ? totalCostGBP.toFixed(4) : totalCostGBP.toFixed(2);
+  }
 });
+
+// ---- cost modal (click on £ in titlebar) ----
+const costModal = document.getElementById('cost-modal');
+const costRows = document.getElementById('cost-rows');
+const costByModel = document.getElementById('cost-by-model');
+async function openCostModal() {
+  const r = await window.hive.getCostSummary();
+  if (!r || !r.ok) { costRows.textContent = 'failed to load'; }
+  else {
+    const fmt = (n) => '£' + (n < 0.01 ? n.toFixed(4) : n.toFixed(2));
+    const fmtTok = (n) => Number(n).toLocaleString();
+    costRows.innerHTML = `
+      <span class="label">Today</span><span class="value">${fmtTok(r.today.tokens)} tok · ${r.today.runs || 0} runs</span><span class="gbp">${fmt(r.today.gbp)}</span>
+      <span class="label">This project</span><span class="value">${fmtTok(r.project.tokens)} tok</span><span class="gbp">${fmt(r.project.gbp)}</span>
+      <span class="label">All time</span><span class="value">${fmtTok(r.allTime.tokens)} tok</span><span class="gbp">${fmt(r.allTime.gbp)}</span>
+    `;
+    costByModel.innerHTML = '<div style="color:var(--muted);margin-bottom:6px;letter-spacing:1px;">BY MODEL (all time)</div>' +
+      r.byModel.sort((a, b) => b.gbp - a.gbp).map(m =>
+        `<div class="row"><span class="m">${m.model}</span><span>${m.runs} runs</span><span>${fmtTok(m.tokens)} tok</span><span class="g">${fmt(m.gbp)}</span></div>`
+      ).join('');
+  }
+  costModal.style.display = 'flex';
+}
+document.getElementById('meta-cost-wrap').addEventListener('click', openCostModal);
+document.getElementById('close-cost').addEventListener('click', (e) => { e.preventDefault(); costModal.style.display = 'none'; });
+costModal.addEventListener('click', (e) => { if (e.target === costModal) costModal.style.display = 'none'; });
+
+// ---- diff modal (per-worker patch view) ----
+const diffModal = document.getElementById('diff-modal');
+const diffTitle = document.getElementById('diff-title');
+const diffStat = document.getElementById('diff-stat');
+const diffPatch = document.getElementById('diff-patch');
+function escapeHtml(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+function colorisePatch(raw) {
+  if (!raw) return '<span class="meta">(no diff)</span>';
+  return raw.split('\n').map(line => {
+    if (line.startsWith('+++') || line.startsWith('---') || line.startsWith('diff ') || line.startsWith('index ')) {
+      return `<span class="meta">${escapeHtml(line)}</span>`;
+    }
+    if (line.startsWith('@@')) return `<span class="hunk">${escapeHtml(line)}</span>`;
+    if (line.startsWith('+')) return `<span class="add">${escapeHtml(line)}</span>`;
+    if (line.startsWith('-')) return `<span class="del">${escapeHtml(line)}</span>`;
+    return `<span>${escapeHtml(line)}</span>`;
+  }).join('');
+}
+async function openDiffModal(workerId) {
+  diffTitle.textContent = `DIFF — ${workerId}`;
+  diffStat.textContent = 'loading…';
+  diffPatch.innerHTML = '';
+  diffModal.style.display = 'flex';
+  const r = await window.hive.getWorkerDiff(workerId);
+  if (!r || !r.ok) {
+    diffStat.textContent = 'failed: ' + (r?.error || 'unknown');
+    return;
+  }
+  diffStat.textContent = (r.stat || '').trim() || '(no changes vs main)';
+  diffPatch.innerHTML = colorisePatch(r.patch || '');
+}
+document.getElementById('close-diff').addEventListener('click', (e) => { e.preventDefault(); diffModal.style.display = 'none'; });
+diffModal.addEventListener('click', (e) => { if (e.target === diffModal) diffModal.style.display = 'none'; });
+
+// ---- Babysit modal ----
+const babysitModal = document.getElementById('babysit-modal');
+const babysitOpen = document.getElementById('open-babysit');
+const babysitClose = document.getElementById('close-babysit');
+const babysitStart = document.getElementById('babysit-start');
+const babysitStop = document.getElementById('babysit-stop');
+const babysitStateEl = document.getElementById('babysit-state');
+const babysitLogEl = document.getElementById('babysit-log');
+async function refreshBabysitState() {
+  const s = await window.hive.babysitStatus();
+  if (!s) return;
+  if (s.running) {
+    babysitStateEl.textContent = `running · ${s.repo} · ${s.processedCount} done${s.currentIssue ? ` · on #${s.currentIssue}` : ''}`;
+    babysitStateEl.classList.add('running');
+    babysitStart.disabled = true;
+    babysitStop.disabled = false;
+  } else {
+    babysitStateEl.textContent = 'idle';
+    babysitStateEl.classList.remove('running');
+    babysitStart.disabled = false;
+    babysitStop.disabled = true;
+  }
+}
+function appendBabysitLog(line) {
+  if (line === '__state__') { refreshBabysitState(); return; }
+  const t = new Date();
+  const ts = `${String(t.getHours()).padStart(2,'0')}:${String(t.getMinutes()).padStart(2,'0')}:${String(t.getSeconds()).padStart(2,'0')}`;
+  babysitLogEl.textContent += `[${ts}] ${line}\n`;
+  babysitLogEl.scrollTop = babysitLogEl.scrollHeight;
+}
+window.hive.onBabysitLog(appendBabysitLog);
+babysitOpen.addEventListener('click', (e) => {
+  e.preventDefault();
+  babysitModal.style.display = 'flex';
+  refreshBabysitState();
+});
+babysitClose.addEventListener('click', (e) => { e.preventDefault(); babysitModal.style.display = 'none'; });
+babysitModal.addEventListener('click', (e) => { if (e.target === babysitModal) babysitModal.style.display = 'none'; });
+babysitStart.addEventListener('click', async () => {
+  const repo = document.getElementById('babysit-repo').value.trim();
+  const label = document.getElementById('babysit-label').value.trim() || 'hive-take-this';
+  const intervalSec = Math.max(30, parseInt(document.getElementById('babysit-interval').value, 10) || 60);
+  const tokenEnv = document.getElementById('babysit-token').value.trim() || 'GITHUB_TOKEN';
+  const r = await window.hive.babysitStart({ repo, label, intervalMs: intervalSec * 1000, tokenEnv });
+  if (!r.ok) appendBabysitLog(`✗ ${r.error}`);
+  refreshBabysitState();
+});
+babysitStop.addEventListener('click', async () => {
+  await window.hive.babysitStop();
+  refreshBabysitState();
+});
+refreshBabysitState();
 
 // ---- task input ----
 const taskInput = document.getElementById('task-input');

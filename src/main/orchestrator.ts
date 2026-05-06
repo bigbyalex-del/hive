@@ -160,6 +160,9 @@ export class Orchestrator {
       case 'role':
         snap.role = evt.role;
         break;
+      case 'cost':
+        this.totalCost += evt.deltaGBP;
+        break;
     }
 
     this.emit(evt);

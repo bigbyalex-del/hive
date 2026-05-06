@@ -173,11 +173,12 @@ export function recordRun(opts: {
   outputTokens: number;
   status: 'done' | 'error' | 'cancelled';
   summary?: string;
+  projectId?: number | null;
 }): void {
   if (!db) return;
   const stmt = db.prepare(`
-    INSERT INTO runs (dispatch_id, ts, agent_id, model, input_tokens, output_tokens, status, summary)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO runs (dispatch_id, ts, agent_id, model, input_tokens, output_tokens, status, summary, project_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   stmt.run([
     opts.dispatchId,
@@ -188,6 +189,7 @@ export function recordRun(opts: {
     opts.outputTokens,
     opts.status,
     opts.summary ?? null,
+    opts.projectId ?? null,
   ]);
   stmt.free();
   scheduleSave();
@@ -227,6 +229,27 @@ export function getTotalTokens(): { input: number; output: number; cost: number 
     output: output ?? 0,
     cost: 0, // wired up properly when we model per-model pricing
   };
+}
+
+// Aggregate runs grouped by model so caller can multiply tokens × per-model
+// pricing. Optional projectId scopes the aggregate; sinceTs scopes by time
+// (e.g. start-of-day for "today's spend").
+export function aggregateRuns(opts: { projectId?: number | null; sinceTs?: number } = {}): { model: string; inputTokens: number; outputTokens: number; runs: number }[] {
+  if (!db) return [];
+  const where: string[] = [];
+  const args: any[] = [];
+  if (opts.projectId != null) { where.push('project_id = ?'); args.push(opts.projectId); }
+  if (opts.sinceTs != null) { where.push('ts >= ?'); args.push(opts.sinceTs); }
+  const sql = `SELECT model, SUM(input_tokens), SUM(output_tokens), COUNT(*) FROM runs ${where.length ? 'WHERE ' + where.join(' AND ') : ''} GROUP BY model`;
+  const stmt = db.prepare(sql);
+  if (args.length) stmt.bind(args);
+  const out: { model: string; inputTokens: number; outputTokens: number; runs: number }[] = [];
+  while (stmt.step()) {
+    const row = stmt.get();
+    out.push({ model: String(row[0] ?? ''), inputTokens: Number(row[1] ?? 0), outputTokens: Number(row[2] ?? 0), runs: Number(row[3] ?? 0) });
+  }
+  stmt.free();
+  return out;
 }
 
 export function insertChunk(opts: { agentId: string; tag?: string; content: string; embedding: number[]; projectId?: number | null }): number | null {

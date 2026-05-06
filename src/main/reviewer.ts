@@ -11,6 +11,9 @@ import { spawn } from 'child_process';
 import { AgentEvent } from '../shared/types';
 import { getProvider } from './providers/registry';
 import { getAgentConfig } from './config';
+import { costGBP } from './pricing';
+import { recordRun } from './db';
+import { activeProjectId } from './projectRepo';
 
 const SYSTEM = `You are the Reviewer in HIVE. A Worker just reported a task done. Your job: rule PASS or NEEDS_FIX based on the diff and the worker's claimed summary.
 
@@ -115,6 +118,14 @@ Now rule PASS or NEEDS_FIX.`;
         _tokenDelta: (delta: number) => this.emit({ type: 'tokens', id: input.workerId, delta }),
         _agentId: this.id,
       } as any);
+
+      // Reviewer cost lands on the worker's card so the £ readout reflects
+      // total spend per dispatch (worker run + reviewer pass).
+      const deltaGBP = costGBP(cfg.model, result.inputTokens, result.outputTokens);
+      this.emit({ type: 'cost', id: input.workerId, deltaGBP, model: cfg.model, inputTokens: result.inputTokens, outputTokens: result.outputTokens });
+      try {
+        recordRun({ dispatchId: null, agentId: this.id, model: cfg.model, inputTokens: result.inputTokens, outputTokens: result.outputTokens, status: 'done', projectId: activeProjectId() });
+      } catch { /* persist failure must not break review */ }
 
       const raw = result.text.trim();
       if (!raw) {

@@ -432,6 +432,25 @@ body.ptype-ios #preview-popout {
   50%      { r: 7; opacity: 0.55; }
 }
 
+/* ---- Cost breakdown rows ---- */
+#cost-rows .label { color: var(--muted); }
+#cost-rows .value { color: var(--text); font-weight: 600; text-align: right; }
+#cost-rows .gbp { color: var(--honey); font-weight: 700; text-align: right; }
+#cost-by-model { border-top: 1px solid var(--border); padding-top: 12px; }
+#cost-by-model .row {
+  display: grid; grid-template-columns: 1fr auto auto auto;
+  gap: 12px; padding: 3px 0;
+  color: var(--muted);
+}
+#cost-by-model .row .m { color: var(--text); }
+#cost-by-model .row .g { color: var(--honey); font-weight: 600; }
+
+/* ---- Diff modal — additions green, deletions red ---- */
+#diff-patch .add { color: #4ade80; background: rgba(74,222,128,0.07); display: block; }
+#diff-patch .del { color: #f87171; background: rgba(248,113,113,0.08); display: block; }
+#diff-patch .hunk { color: var(--accent); margin-top: 4px; display: block; }
+#diff-patch .meta { color: var(--muted); display: block; }
+
 /* ---- Project picker (titlebar) ---- */
 .project-picker {
   display: inline-flex; align-items: center; gap: 4px;
@@ -527,6 +546,49 @@ body.ptype-ios #preview-popout {
   min-height: 14px;
 }
 .project-menu-status.error { color: var(--error); }
+.project-menu-clone {
+  padding: 0 12px 8px;
+}
+.project-menu-clone input {
+  width: 100%;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 4px 8px;
+  border-radius: 3px;
+  font-family: inherit;
+  font-size: 11px;
+  outline: none;
+}
+.project-menu-clone input:focus { border-color: var(--accent); }
+
+/* ---- Babysit modal form ---- */
+#babysit-form input {
+  background: var(--panel-2);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  padding: 5px 8px;
+  border-radius: 3px;
+  font-family: inherit;
+  font-size: 12px;
+  outline: none;
+}
+#babysit-form input:focus { border-color: var(--accent); }
+#babysit-modal button {
+  background: var(--accent);
+  border: 0;
+  color: #00171f;
+  font-family: inherit;
+  font-weight: 700;
+  letter-spacing: 1px;
+  font-size: 11px;
+  padding: 6px 16px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+#babysit-modal button:disabled { opacity: 0.4; cursor: not-allowed; }
+#babysit-modal #babysit-stop { background: var(--error); color: white; }
+#babysit-state.running { color: var(--working); }
 
 /* Premium-theme tweaks for the project picker so it doesn't break the glass aesthetic */
 body.theme-premium .project-picker {

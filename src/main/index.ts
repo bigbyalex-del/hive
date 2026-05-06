@@ -12,7 +12,10 @@ import { loadDefaultMcpServers, shutdownAllMcp } from './mcp';
 import { initDb, shutdownDb } from './db';
 import { listTemplates, scaffoldTemplate } from './templates';
 import { projectDir, commitProjectChanges, ensureProjectRepo, workerWorktreePath, setActiveProject } from './projectRepo';
-import { listProjects, createProject, getProject, getActiveProjectId, setActiveProjectId, deleteProject } from './db';
+import { listProjects, createProject, getProject, getActiveProjectId, setActiveProjectId, deleteProject, aggregateRuns } from './db';
+import { costGBP } from './pricing';
+import { diffWorkerBranch } from './projectRepo';
+import { babysitStart, babysitStop, babysitStatus } from './babysit';
 
 dotenv.config({ path: path.join(__dirname, '..', '..', '.env') });
 
@@ -286,23 +289,39 @@ app.whenReady().then(async () => {
     const proj = getProject(activeId);
     return { ok: !!proj, project: proj ?? null };
   });
-  ipcMain.handle(IPC.CreateProject, async (_e, name: string) => {
+  ipcMain.handle(IPC.CreateProject, async (_e, payload: string | { name: string; gitUrl?: string }) => {
+    const isObj = typeof payload === 'object' && payload !== null;
+    const name = isObj ? payload.name : payload;
+    const gitUrl = isObj ? (payload.gitUrl || '').trim() : '';
     const trimmed = String(name ?? '').trim();
     if (!trimmed) return { ok: false, error: 'name required' };
     if (trimmed.length > 60) return { ok: false, error: 'name too long (max 60 chars)' };
-    // Slug: lowercase alphanum + hyphen, derived from name; uniquify with -2/-3
-    // suffix on collision so two "My App"s don't fight over the same dir.
     const baseSlug = trimmed.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'project';
     const existing = new Set(listProjects().map(p => p.slug));
     let slug = baseSlug;
     let i = 2;
     while (existing.has(slug)) { slug = `${baseSlug}-${i++}`; }
     const dir = `worktrees/projects/${slug}`;
+    const absDir = path.join(process.cwd(), dir);
     try {
       const fs = await import('fs/promises');
-      await fs.mkdir(path.join(process.cwd(), dir), { recursive: true });
+      if (gitUrl) {
+        // Clone path — assumes auth via SSH or PAT-in-URL. We do NOT inject
+        // env tokens here; the user's git config handles credentials.
+        await fs.mkdir(path.dirname(absDir), { recursive: true });
+        const { spawn } = await import('child_process');
+        await new Promise<void>((resolve, reject) => {
+          const child = spawn('git', ['clone', gitUrl, absDir], { shell: false, windowsHide: true });
+          let stderr = '';
+          child.stderr.on('data', b => { stderr += b.toString(); });
+          child.on('error', reject);
+          child.on('close', code => code === 0 ? resolve() : reject(new Error(`git clone failed: ${stderr.slice(0, 200)}`)));
+        });
+      } else {
+        await fs.mkdir(absDir, { recursive: true });
+      }
     } catch (err: any) {
-      return { ok: false, error: `mkdir failed: ${err?.message ?? err}` };
+      return { ok: false, error: err?.message ?? String(err) };
     }
     const proj = createProject(trimmed, slug, dir);
     if (!proj) return { ok: false, error: 'db insert failed' };
@@ -320,6 +339,47 @@ app.whenReady().then(async () => {
     setActiveProjectId(proj.id);
     const res = orchestrator ? await orchestrator.onProjectSwitched() : { ok: true };
     return { ...res, project: proj };
+  });
+  ipcMain.handle(IPC.GetCostSummary, async (_e, projectId: number | null) => {
+    // Returns spend totals: today (since local midnight), project-active,
+    // all-time. Numbers come from runs aggregated by model × pricing.ts rates.
+    const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
+    const allTime = aggregateRuns({});
+    const today = aggregateRuns({ sinceTs: startOfDay.getTime() });
+    const project = aggregateRuns({ projectId: projectId ?? getActiveProjectId() ?? 1 });
+    const sumGBP = (rows: { model: string; inputTokens: number; outputTokens: number }[]) =>
+      rows.reduce((s, r) => s + costGBP(r.model, r.inputTokens, r.outputTokens), 0);
+    const sumTokens = (rows: { inputTokens: number; outputTokens: number }[]) =>
+      rows.reduce((s, r) => s + r.inputTokens + r.outputTokens, 0);
+    return {
+      ok: true,
+      today: { gbp: sumGBP(today), tokens: sumTokens(today), runs: today.reduce((s, r) => s + (r as any).runs, 0) },
+      project: { gbp: sumGBP(project), tokens: sumTokens(project) },
+      allTime: { gbp: sumGBP(allTime), tokens: sumTokens(allTime) },
+      byModel: allTime.map(r => ({ model: r.model, runs: r.runs, tokens: r.inputTokens + r.outputTokens, gbp: costGBP(r.model, r.inputTokens, r.outputTokens) })),
+    };
+  });
+  ipcMain.handle(IPC.BabysitStart, async (_e, payload: { repo: string; label: string; intervalMs: number; tokenEnv: string }) => {
+    if (!orchestrator) return { ok: false, error: 'no orchestrator' };
+    const log = (line: string) => mainWindow?.webContents.send(IPC.BabysitLog, line);
+    const stateChanged = () => mainWindow?.webContents.send(IPC.BabysitLog, '__state__');
+    return babysitStart(orchestrator, {
+      repo: payload.repo,
+      label: payload.label || 'hive-take-this',
+      intervalMs: Math.max(30_000, Number(payload.intervalMs) || 60_000),
+      tokenEnv: payload.tokenEnv || 'GITHUB_TOKEN',
+    }, log, stateChanged);
+  });
+  ipcMain.handle(IPC.BabysitStop, () => babysitStop());
+  ipcMain.handle(IPC.BabysitStatus, () => babysitStatus());
+
+  ipcMain.handle(IPC.GetWorkerDiff, async (_e, workerId: string) => {
+    try {
+      const result = await diffWorkerBranch(workerId);
+      return { ok: true, ...result };
+    } catch (err: any) {
+      return { ok: false, error: err?.message ?? String(err) };
+    }
   });
   ipcMain.handle(IPC.DeleteProject, async (_e, id: number) => {
     if (id === 1) return { ok: false, error: 'cannot delete the default project' };
