@@ -225,7 +225,7 @@ document.getElementById('preview-popout').addEventListener('click', async (e) =>
   e.preventDefault();
   await window.hive.openPreviewWindow();
   // Push current iframe content immediately so the new window isn't blank
-  if (previewFrame.srcdoc) await window.hive.pushPreviewHtml(previewFrame.srcdoc);
+  if (previewFrame.srcdoc) await window.hive.pushPreviewHtml(previewFrame.srcdoc, projectType);
 });
 
 cancelAllLink.addEventListener('click', async (e) => {
@@ -301,7 +301,7 @@ async function refreshPreview() {
   previewFrame.srcdoc = r.content;
   lastPreviewKey = key;
   lastPreviewContent = r.content;
-  window.hive.pushPreviewHtml(r.content).catch(() => {});
+  window.hive.pushPreviewHtml(r.content, projectType).catch(() => {});
 }
 
 // ---- live event subscription ----

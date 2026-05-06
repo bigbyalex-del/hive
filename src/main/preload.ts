@@ -39,7 +39,8 @@ contextBridge.exposeInMainWorld('hive', {
   listWorktreeFiles: (workerId: string) => ipcRenderer.invoke(IPC.ListWorktreeFiles, workerId),
   readWorktreeFile: (workerId: string, path: string) => ipcRenderer.invoke(IPC.ReadWorktreeFile, { workerId, path }),
   openPreviewWindow: () => ipcRenderer.invoke(IPC.OpenPreviewWindow),
-  pushPreviewHtml: (html: string) => ipcRenderer.invoke(IPC.PreviewBroadcast, html),
+  pushPreviewHtml: (html: string, projectType?: string) =>
+    ipcRenderer.invoke(IPC.PreviewBroadcast, projectType ? { html, projectType } : html),
   captureScreen: () => ipcRenderer.invoke(IPC.CaptureScreen),
   snipRegion: () => ipcRenderer.invoke(IPC.SnipRegion),
   speak: (text: string) => ipcRenderer.invoke(IPC.Speak, text),

@@ -20,6 +20,8 @@ let orchestrator: Orchestrator | null = null;
 
 let previewReady = false;
 let pendingPreviewHtml: string | null = null;
+let pendingPreviewType: string | null = null;
+let lastPreviewType = 'web';
 
 function openPreviewWindow() {
   if (previewWindow && !previewWindow.isDestroyed()) {
@@ -29,11 +31,13 @@ function openPreviewWindow() {
   previewReady = false;
   // Reset dedupe so the first push after open isn't blocked as duplicate.
   lastBroadcastHtml = '';
+  // iOS bezel needs vertical space — open taller. Web mode is fine wider.
+  const tallForIos = lastPreviewType === 'ios';
   previewWindow = new BrowserWindow({
-    width: 1280,
-    height: 800,
+    width: tallForIos ? 520 : 1280,
+    height: tallForIos ? 1040 : 800,
     title: 'Hive — Preview',
-    backgroundColor: '#ffffff',
+    backgroundColor: '#0b0f14',
     autoHideMenuBar: true,
     webPreferences: {
       contextIsolation: true,
@@ -43,6 +47,12 @@ function openPreviewWindow() {
   previewWindow.loadFile(path.join(__dirname, '..', '..', 'src', 'renderer', 'preview.html'));
   previewWindow.webContents.on('did-finish-load', () => {
     previewReady = true;
+    if (pendingPreviewType !== null) {
+      injectPreviewType(pendingPreviewType);
+      pendingPreviewType = null;
+    } else {
+      injectPreviewType(lastPreviewType);
+    }
     if (pendingPreviewHtml !== null) {
       injectPreview(pendingPreviewHtml);
       pendingPreviewHtml = null;
@@ -70,16 +80,31 @@ function injectPreview(html: string) {
   `).catch(err => console.error('[hive] preview injection failed:', err));
 }
 
+function injectPreviewType(projectType: string) {
+  if (!previewWindow || previewWindow.isDestroyed()) return;
+  const safeType = JSON.stringify(projectType);
+  previewWindow.webContents.executeJavaScript(`
+    (function() {
+      document.body.classList.remove('ptype-web', 'ptype-ios', 'ptype-api');
+      document.body.classList.add('ptype-' + ${safeType});
+      true;
+    })();
+  `).catch(err => console.error('[hive] preview type injection failed:', err));
+}
+
 let lastBroadcastHtml = '';
-function broadcastPreview(html: string) {
+function broadcastPreview(html: string, projectType?: string) {
+  if (projectType) lastPreviewType = projectType;
   if (!previewWindow || previewWindow.isDestroyed()) {
     // No window open — don't update dedupe key so next push (after open) lands.
     return;
   }
   if (!previewReady) {
     pendingPreviewHtml = html;
+    if (projectType) pendingPreviewType = projectType;
     return;
   }
+  if (projectType) injectPreviewType(projectType);
   if (html === lastBroadcastHtml) return; // skip duplicate to avoid iframe reload flash
   lastBroadcastHtml = html;
   injectPreview(html);
@@ -189,7 +214,11 @@ app.whenReady().then(async () => {
   ipcMain.handle(IPC.SetModelConfig, (_e, cfg) => { setModelConfig(cfg); return { ok: true }; });
   ipcMain.handle(IPC.ListProviders, () => listProviders());
   ipcMain.handle(IPC.OpenPreviewWindow, () => { openPreviewWindow(); return { ok: true }; });
-  ipcMain.handle(IPC.PreviewBroadcast, (_e, html: string) => { broadcastPreview(html); return { ok: true }; });
+  ipcMain.handle(IPC.PreviewBroadcast, (_e, payload: string | { html: string; projectType?: string }) => {
+    if (typeof payload === 'string') broadcastPreview(payload);
+    else broadcastPreview(payload.html, payload.projectType);
+    return { ok: true };
+  });
   ipcMain.handle(IPC.TranscribeAudio, async (_e, payload: { bytes: ArrayBuffer; mime: string }) => {
     try {
       const text = await transcribeAudio(new Uint8Array(payload.bytes), payload.mime);
