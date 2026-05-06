@@ -55,6 +55,7 @@ export const IPC = {
   ListTemplates: 'hive:list-templates',
   ScaffoldTemplate: 'hive:scaffold-template',
   RunSpecInterview: 'hive:run-spec-interview',
+  OverrideReview: 'hive:override-review',
 } as const;
 
 export type AgentEvent =

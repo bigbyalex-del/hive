@@ -25,6 +25,7 @@ for (const a of AGENTS) {
       <div class="id">${isManager ? '◆ MANAGER' : a.id}<span class="tag">${isManager ? 'orchestrator' : 'worker'}</span></div>
       <div style="display:flex;align-items:center;gap:6px;">
         ${isManager ? '' : `<a href="#" class="cancel-btn" data-id="${a.id}" style="display:none;color:var(--error);font-size:11px;text-decoration:none;">⏹ cancel</a>`}
+        ${isManager ? '' : `<a href="#" class="override-btn" data-id="${a.id}" style="display:none;color:var(--accent,#7CFFB2);font-size:11px;text-decoration:none;" title="Force-merge despite reviewer NEEDS_FIX">✓ force merge</a>`}
         <div class="status s-idle"><span class="dot"></span><span class="status-text">idle</span></div>
       </div>
     </div>
@@ -41,6 +42,7 @@ for (const a of AGENTS) {
     logEl: cell.querySelector('.log'),
     tokensEl: cell.querySelector('.tokens'),
     cancelEl: cell.querySelector('.cancel-btn'),
+    overrideEl: cell.querySelector('.override-btn'),
     log: [],
     tokens: 0,
     status: 'idle',
@@ -53,6 +55,21 @@ for (const a of AGENTS) {
       await window.hive.cancelWorker(a.id);
     });
   }
+  const overrideBtn = cell.querySelector('.override-btn');
+  if (overrideBtn) {
+    overrideBtn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      overrideBtn.style.opacity = '0.5';
+      try {
+        const res = await window.hive.overrideReview(a.id);
+        if (res && res.ok === false && res.error) {
+          appendLog(a.id, `✗ override: ${res.error}`);
+        }
+      } finally {
+        overrideBtn.style.opacity = '1';
+      }
+    });
+  }
 }
 
 function setStatus(id, status) {
@@ -61,6 +78,7 @@ function setStatus(id, status) {
   c.statusText.textContent = status;
   c.status = status;
   if (c.cancelEl) c.cancelEl.style.display = status === 'working' ? 'inline' : 'none';
+  if (c.overrideEl) c.overrideEl.style.display = status === 'review' ? 'inline' : 'none';
   updatePowerLines();
 }
 function setTask(id, task) {

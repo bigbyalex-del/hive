@@ -13,7 +13,7 @@ import { Provider, RunOptions, RunResult, RunEvents, ToolDef } from './types';
 import { validateCommand, audit } from '../runtime';
 import { getMcpToolsForWorker } from '../mcp';
 import { runBrowserTest } from '../browserTest';
-import { remember, recall } from '../memory';
+import { remember, recall, autoEmbedWrite } from '../memory';
 
 const dynamicImport = new Function('m', 'return import(m)') as (m: string) => Promise<any>;
 
@@ -76,6 +76,7 @@ function fileTools(cwd: string, agentId: string): ToolDef[] {
         const abs = safe(p);
         await fs.mkdir(path.dirname(abs), { recursive: true });
         await fs.writeFile(abs, content, 'utf8');
+        autoEmbedWrite(p, content);
         return `wrote ${p} (${content.length} bytes)`;
       },
     },
@@ -100,7 +101,9 @@ function fileTools(cwd: string, agentId: string): ToolDef[] {
         if (!cur.includes(old_string)) throw new Error('old_string not found in file');
         const occurrences = cur.split(old_string).length - 1;
         if (occurrences > 1) throw new Error(`old_string appears ${occurrences} times — make it unique`);
-        await fs.writeFile(abs, cur.replace(old_string, new_string), 'utf8');
+        const updated = cur.replace(old_string, new_string);
+        await fs.writeFile(abs, updated, 'utf8');
+        autoEmbedWrite(p, updated);
         return `edited ${p}`;
       },
     },

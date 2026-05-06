@@ -29,6 +29,7 @@ const IPC = {
   ListTemplates: 'hive:list-templates',
   ScaffoldTemplate: 'hive:scaffold-template',
   RunSpecInterview: 'hive:run-spec-interview',
+  OverrideReview: 'hive:override-review',
 };
 
 contextBridge.exposeInMainWorld('hive', {
@@ -65,6 +66,7 @@ contextBridge.exposeInMainWorld('hive', {
   scaffoldTemplate: (workerId: string, templateName: string, projectName: string) =>
     ipcRenderer.invoke(IPC.ScaffoldTemplate, { workerId, templateName, projectName }),
   runSpecInterview: (task: string) => ipcRenderer.invoke(IPC.RunSpecInterview, task),
+  overrideReview: (workerId: string) => ipcRenderer.invoke(IPC.OverrideReview, workerId),
   onAgentEvent: (cb: (evt: any) => void) => {
     const listener = (_: Electron.IpcRendererEvent, evt: any) => cb(evt);
     ipcRenderer.on(IPC.AgentEvent, listener);

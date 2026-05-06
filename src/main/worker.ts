@@ -94,10 +94,10 @@ export class Worker {
     }
   }
 
-  async execute(subtask: string, imageDataUrl?: string, modelOverride?: string, abortSignal?: AbortSignal): Promise<void> {
+  async execute(subtask: string, imageDataUrl?: string, modelOverride?: string, abortSignal?: AbortSignal, opts?: { continueExisting?: boolean }): Promise<void> {
     this.emit({ type: 'status', id: this.id, status: 'working' });
     this.emit({ type: 'task', id: this.id, task: subtask });
-    this.emit({ type: 'log', id: this.id, line: '→ starting' });
+    this.emit({ type: 'log', id: this.id, line: opts?.continueExisting ? '→ retrying with reviewer feedback' : '→ starting' });
 
     // Hard 5-minute timeout per worker. Combines with the parent abort signal.
     const localCtrl = new AbortController();
@@ -110,7 +110,11 @@ export class Worker {
     }
     const effectiveSignal = localCtrl.signal;
 
-    await this.ensureWorktree();
+    // Reviewer-redispatch path keeps the existing worktree + branch so the
+    // worker sees its prior code and the in-flight changes already made.
+    if (!opts?.continueExisting) {
+      await this.ensureWorktree();
+    }
 
     // If user attached a screenshot, drop it into the worktree so the worker
     // can Read it. Vision-capable Claude models will analyse the PNG.

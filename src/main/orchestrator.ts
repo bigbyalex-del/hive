@@ -26,6 +26,16 @@ export class Orchestrator {
   private busyQueue: { task: string; image?: string; resolve: (r: any) => void }[] = [];
   private dispatchHistory: DispatchRecord[] = []; // memory for Manager status questions
   private rawSubscribers: Array<(evt: AgentEvent) => void> = [];
+  // Per-worker bookkeeping for the Reviewer-retry loop and manual override.
+  // Cleared on every fresh dispatch (a non-retry execute on that worker).
+  private reviewState = new Map<string, {
+    originalTask: string;
+    model?: string;
+    attempts: number;       // Reviewer NEEDS_FIX count (0 = first pass)
+    falsePositives: number; // bumped each time the user overrides a NEEDS_FIX
+    lastVerdict?: string;   // Reviewer's last NEEDS_FIX message (for UI/override)
+  }>();
+  private static readonly MAX_REVIEW_RETRIES = 1; // 1 auto-retry → up to 2 reviewer passes
   // Hard cap on tokens consumed per single user-fired run. Default ~5M tokens
   // (~£10 worst case on Sonnet, much less on Haiku). Configurable later.
   private readonly RUN_TOKEN_CAP = 5_000_000;
@@ -182,74 +192,14 @@ export class Orchestrator {
           this.emit({ type: 'log', id: worker.id, line: `(busy — skipped new task)` });
           return;
         }
-        const ctrl = new AbortController();
-        this.inFlight.set(worker.id, ctrl);
-
-        let workerSucceeded = false;
-        let workerSummary = '';
-        const captureSummary = (evt: AgentEvent) => {
-          // Worker.execute logs `✓ <summary>` on success — capture it for the
-          // Reviewer prompt. Last such line wins.
-          if (evt.id === worker.id && evt.type === 'log' && evt.line.startsWith('✓ ')) {
-            workerSummary = evt.line.replace(/^✓\s*/, '');
-            workerSucceeded = true;
-          }
-        };
-        // Hook the orchestrator's own emit briefly. Cheaper than threading a
-        // result back through Worker.execute.
-        const wrappedHandler = (evt: AgentEvent) => { captureSummary(evt); };
-        const unsubscribe = this.subscribeRaw(wrappedHandler);
-
-        worker.execute(subtask.task, imageDataUrl, subtask.model, ctrl.signal)
-          .catch(err => {
-            this.emit({ type: 'log', id: worker.id, line: `✗ ${err?.message ?? err}` });
-          })
-          .finally(async () => {
-            this.inFlight.delete(worker.id);
-            unsubscribe();
-            if (workerSucceeded && this.reviewEnabled && !this.runCancelled) {
-              const worktreePath = path.join(process.cwd(), 'worktrees', `wt-${worker.id.slice(1)}`);
-              let verdictPassed = false;
-              try {
-                const verdict = await this.reviewer.review({
-                  workerId: worker.id,
-                  worktreePath,
-                  originalTask: subtask.task,
-                  workerSummary,
-                });
-                verdictPassed = verdict.pass;
-              } catch (err: any) {
-                this.emit({ type: 'log', id: worker.id, line: `🔍 review error: ${err?.message ?? err}` });
-                // Default to PASS on reviewer failure so a transient Haiku
-                // hiccup doesn't strand committed work in limbo.
-                verdictPassed = true;
-              }
-
-              if (verdictPassed) {
-                try {
-                  const committed = await commitWorkerChanges(worker.id, workerSummary || subtask.task);
-                  if (committed) {
-                    const merge = await mergeWorkerBranch(worker.id, workerSummary || subtask.task);
-                    if (merge.ok) {
-                      if (merge.alreadyMerged) {
-                        this.emit({ type: 'log', id: worker.id, line: '🌿 nothing to merge' });
-                      } else {
-                        this.emit({ type: 'log', id: worker.id, line: '🌿 merged into main' });
-                      }
-                    } else {
-                      const files = merge.conflict?.length ? ` (${merge.conflict.slice(0, 3).join(', ')})` : '';
-                      this.emit({ type: 'log', id: worker.id, line: `⚠ merge conflict${files} — branch left for manual resolution` });
-                      this.emit({ type: 'status', id: worker.id, status: 'review' });
-                    }
-                  } else {
-                    this.emit({ type: 'log', id: worker.id, line: '· no file changes to commit' });
-                  }
-                } catch (err: any) {
-                  this.emit({ type: 'log', id: worker.id, line: `✗ commit/merge: ${err?.message ?? err}` });
-                }
-              }
-            }
-          });
+        // Fresh dispatch — reset review bookkeeping for this worker.
+        this.reviewState.set(worker.id, {
+          originalTask: subtask.task,
+          model: subtask.model,
+          attempts: 0,
+          falsePositives: this.reviewState.get(worker.id)?.falsePositives ?? 0,
+        });
+        this.dispatchWorker(worker, subtask.task, imageDataUrl, subtask.model);
       });
 
       return { ok: true };
@@ -258,6 +208,142 @@ export class Orchestrator {
       this.flushBusyQueue();
       return { ok: false, error: err?.message ?? String(err) };
     }
+  }
+
+  // Single worker dispatch + post-run review/merge. Re-entrant for the
+  // Reviewer-redispatch loop: pass continueExisting=true on retry so the
+  // worker keeps its branch + prior changes instead of starting fresh.
+  private dispatchWorker(
+    worker: Worker,
+    task: string,
+    imageDataUrl: string | undefined,
+    model: string | undefined,
+    opts: { continueExisting?: boolean } = {},
+  ): void {
+    const ctrl = new AbortController();
+    this.inFlight.set(worker.id, ctrl);
+
+    let workerSucceeded = false;
+    let workerSummary = '';
+    const captureSummary = (evt: AgentEvent) => {
+      if (evt.id === worker.id && evt.type === 'log' && evt.line.startsWith('✓ ')) {
+        workerSummary = evt.line.replace(/^✓\s*/, '');
+        workerSucceeded = true;
+      }
+    };
+    const unsubscribe = this.subscribeRaw(captureSummary);
+
+    worker.execute(task, imageDataUrl, model, ctrl.signal, opts)
+      .catch(err => {
+        this.emit({ type: 'log', id: worker.id, line: `✗ ${err?.message ?? err}` });
+      })
+      .finally(async () => {
+        this.inFlight.delete(worker.id);
+        unsubscribe();
+        if (workerSucceeded && this.reviewEnabled && !this.runCancelled) {
+          await this.handleReview(worker, task, workerSummary, imageDataUrl, model);
+        }
+      });
+  }
+
+  private async handleReview(
+    worker: Worker,
+    task: string,
+    workerSummary: string,
+    imageDataUrl: string | undefined,
+    model: string | undefined,
+  ): Promise<void> {
+    const worktreePath = path.join(process.cwd(), 'worktrees', `wt-${worker.id.slice(1)}`);
+    const state = this.reviewState.get(worker.id);
+
+    let verdictPass = false;
+    let verdictMsg = '';
+    try {
+      const verdict = await this.reviewer.review({
+        workerId: worker.id,
+        worktreePath,
+        originalTask: state?.originalTask ?? task,
+        workerSummary,
+      });
+      verdictPass = verdict.pass;
+      verdictMsg = verdict.message;
+    } catch (err: any) {
+      this.emit({ type: 'log', id: worker.id, line: `🔍 review error: ${err?.message ?? err}` });
+      // Default to PASS on reviewer failure so a transient Haiku hiccup
+      // doesn't strand committed work in limbo.
+      verdictPass = true;
+    }
+
+    if (verdictPass) {
+      await this.commitAndMerge(worker.id, workerSummary, task);
+      return;
+    }
+
+    // NEEDS_FIX path. Capture verdict so the override IPC has it.
+    if (state) {
+      state.lastVerdict = verdictMsg;
+    }
+
+    const attempts = state?.attempts ?? 0;
+    if (attempts < Orchestrator.MAX_REVIEW_RETRIES && !this.runCancelled) {
+      if (state) state.attempts = attempts + 1;
+      this.emit({ type: 'log', id: worker.id, line: `↻ auto-retry ${attempts + 1}/${Orchestrator.MAX_REVIEW_RETRIES} with reviewer feedback` });
+      const retryPrompt = `Your previous attempt at this task was reviewed and rejected.\n\nORIGINAL TASK:\n${state?.originalTask ?? task}\n\nREVIEWER VERDICT (NEEDS_FIX):\n${verdictMsg}\n\nFix the issue described above. Your prior code is still in your worktree — read it, edit it, verify it. Reply with one short summary of what you changed.`;
+      // continueExisting:true keeps the branch + files so the worker can
+      // iterate rather than start over from main.
+      this.dispatchWorker(worker, retryPrompt, imageDataUrl, model, { continueExisting: true });
+      return;
+    }
+
+    // Out of retries. Leave worker stranded in 'review' status with the
+    // verdict captured so the UI override button can force-merge.
+    this.emit({ type: 'log', id: worker.id, line: `⏸ stuck on NEEDS_FIX — click "force merge" on the card to override` });
+    this.emit({ type: 'status', id: worker.id, status: 'review' });
+  }
+
+  private async commitAndMerge(workerId: string, summary: string, fallbackMessage: string): Promise<void> {
+    try {
+      const committed = await commitWorkerChanges(workerId, summary || fallbackMessage);
+      if (!committed) {
+        this.emit({ type: 'log', id: workerId, line: '· no file changes to commit' });
+        return;
+      }
+      const merge = await mergeWorkerBranch(workerId, summary || fallbackMessage);
+      if (merge.ok) {
+        if (merge.alreadyMerged) {
+          this.emit({ type: 'log', id: workerId, line: '🌿 nothing to merge' });
+        } else {
+          this.emit({ type: 'log', id: workerId, line: '🌿 merged into main' });
+        }
+      } else {
+        const files = merge.conflict?.length ? ` (${merge.conflict.slice(0, 3).join(', ')})` : '';
+        this.emit({ type: 'log', id: workerId, line: `⚠ merge conflict${files} — branch left for manual resolution` });
+        this.emit({ type: 'status', id: workerId, status: 'review' });
+      }
+    } catch (err: any) {
+      this.emit({ type: 'log', id: workerId, line: `✗ commit/merge: ${err?.message ?? err}` });
+    }
+  }
+
+  // User-triggered force-merge from the dashboard. Bumps the worker's
+  // false-positive count for diagnostics.
+  async overrideReview(workerId: string): Promise<{ ok: boolean; error?: string; falsePositives?: number }> {
+    const state = this.reviewState.get(workerId);
+    const snap = this.agents.get(workerId);
+    if (!snap) return { ok: false, error: 'unknown worker' };
+    if (snap.status !== 'review') return { ok: false, error: 'worker is not in review state' };
+    if (state) state.falsePositives += 1;
+    const verdict = state?.lastVerdict ? ` (was: ${state.lastVerdict.slice(0, 80)})` : '';
+    this.emit({ type: 'log', id: workerId, line: `🟢 reviewer overridden by user${verdict}` });
+    const message = state?.originalTask ?? snap.task ?? 'override merge';
+    await this.commitAndMerge(workerId, message, message);
+    if (snap.status === 'review') this.emit({ type: 'status', id: workerId, status: 'done' });
+    return { ok: true, falsePositives: state?.falsePositives ?? 0 };
+  }
+
+  reviewerStats(workerId: string): { falsePositives: number; lastVerdict?: string } {
+    const s = this.reviewState.get(workerId);
+    return { falsePositives: s?.falsePositives ?? 0, lastVerdict: s?.lastVerdict };
   }
 
   private flushBusyQueue() {

@@ -263,6 +263,10 @@ app.whenReady().then(async () => {
     }
   });
   if (!hotkeyOk) console.warn('[hive] failed to register Ctrl+Shift+H global hotkey');
+  ipcMain.handle(IPC.OverrideReview, async (_e, workerId: string) => {
+    if (!orchestrator) return { ok: false, error: 'no orchestrator' };
+    return orchestrator.overrideReview(workerId);
+  });
   ipcMain.handle(IPC.RunSpecInterview, async (_e, task: string) => {
     if (!orchestrator) return { ok: false, questions: [] };
     try {
