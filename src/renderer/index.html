@@ -14,6 +14,11 @@
       runtime <b id="meta-runtime">00:00</b> &nbsp;·&nbsp;
       tokens <b id="meta-tokens">0</b>
       &nbsp;·&nbsp;
+      <select id="project-type" title="Project type — drives preview chrome and worker hints" style="background:var(--panel);border:1px solid var(--border-strong);color:var(--text);font-family:inherit;padding:3px 6px;border-radius:3px;font-size:11px;margin-right:10px;">
+        <option value="web">🌐 web</option>
+        <option value="ios">📱 iOS</option>
+        <option value="api">⚙ api</option>
+      </select>
       <a href="#" id="open-templates" style="color:var(--accent);text-decoration:none;margin-right:10px;">📦 templates</a>
       <a href="#" id="open-settings" style="color:var(--accent);text-decoration:none;">⚙ models</a>
     </div>
@@ -70,13 +75,31 @@
       <button class="dtab" data-tab="preview">🌐 Preview</button>
       <span class="drawer-spacer"></span>
       <select id="preview-source" style="display:none;background:var(--panel);border:1px solid var(--border-strong);color:var(--text);font-family:inherit;padding:3px 6px;border-radius:3px;font-size:11px;"></select>
+      <span id="annotate-tools" style="display:none;align-items:center;gap:6px;font-size:11px;margin-right:10px;">
+        <button id="annot-toggle" title="Draw on the preview to redline" style="background:var(--panel);border:1px solid var(--border-strong);color:var(--text);font-family:inherit;padding:2px 8px;border-radius:3px;cursor:pointer;font-size:11px;">✎ mark up</button>
+        <button id="annot-clear" title="Clear strokes" style="display:none;background:var(--panel);border:1px solid var(--border-strong);color:var(--muted);font-family:inherit;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:11px;">clear</button>
+        <button id="annot-send" title="Send strokes + comment to a worker as follow-up dispatch" style="display:none;background:var(--accent);border:none;color:#00171f;font-weight:700;font-family:inherit;padding:2px 8px;border-radius:3px;cursor:pointer;font-size:11px;">send →</button>
+      </span>
       <a href="#" id="preview-popout" style="display:none;color:var(--accent);text-decoration:none;font-size:11px;margin-right:10px;">↗ pop out</a>
       <a href="#" id="cancel-all-link" style="color:var(--error);text-decoration:none;font-size:11px;margin-right:10px;">⏹ stop all</a>
       <a href="#" id="drawer-toggle" style="color:var(--accent);text-decoration:none;font-size:11px;">▲ expand</a>
     </div>
     <div class="drawer-body">
       <div id="activity-pane" class="dpane active"></div>
-      <div id="preview-pane" class="dpane"><iframe id="preview-frame" sandbox="allow-same-origin"></iframe></div>
+      <div id="preview-pane" class="dpane">
+        <div id="preview-stage">
+          <div id="preview-device">
+            <div id="preview-notch"></div>
+            <iframe id="preview-frame" sandbox="allow-same-origin"></iframe>
+            <canvas id="annot-canvas"></canvas>
+            <div id="preview-home"></div>
+          </div>
+        </div>
+        <div id="annot-comment-row" style="display:none;">
+          <input id="annot-comment" type="text" placeholder="Describe what to change (or leave blank)" />
+          <select id="annot-worker"><option value="auto">auto (latest)</option><option>W1</option><option>W2</option><option>W3</option><option>W4</option><option>W5</option><option>W6</option><option>W7</option><option>W8</option></select>
+        </div>
+      </div>
     </div>
   </div>
 

@@ -100,6 +100,95 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({ plugins: [react()] });
 `;
 
+const EXPO_RN_PKG = `{
+  "name": "{{NAME}}",
+  "version": "0.0.1",
+  "main": "expo-router/entry",
+  "scripts": {
+    "start": "expo start",
+    "web": "expo start --web",
+    "ios": "expo start --ios",
+    "android": "expo start --android"
+  },
+  "dependencies": {
+    "expo": "~52.0.0",
+    "expo-router": "~4.0.0",
+    "expo-status-bar": "~2.0.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "react-native": "0.76.5",
+    "react-native-web": "~0.19.13"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.25.0"
+  },
+  "private": true
+}
+`;
+
+const EXPO_RN_APP_JSON = `{
+  "expo": {
+    "name": "{{NAME}}",
+    "slug": "{{NAME}}",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "{{NAME}}",
+    "userInterfaceStyle": "automatic",
+    "ios": { "supportsTablet": false },
+    "web": { "bundler": "metro" },
+    "plugins": ["expo-router"]
+  }
+}
+`;
+
+const EXPO_RN_APP_INDEX = `import { View, Text, StyleSheet, Pressable } from 'react-native';
+import { useState } from 'react';
+
+export default function Home() {
+  const [count, setCount] = useState(0);
+  return (
+    <View style={styles.screen}>
+      <Text style={styles.title}>{{NAME}}</Text>
+      <Text style={styles.subtitle}>Edit app/index.tsx to begin.</Text>
+      <Pressable style={styles.btn} onPress={() => setCount(c => c + 1)}>
+        <Text style={styles.btnText}>Tapped {count} times</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  screen: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0b0d10', padding: 24 },
+  title: { fontSize: 32, fontWeight: '700', color: '#e6e8eb', marginBottom: 8 },
+  subtitle: { fontSize: 14, color: '#9aa3ad', marginBottom: 24 },
+  btn: { backgroundColor: '#22d3ee', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 8 },
+  btnText: { color: '#00171f', fontWeight: '700', fontSize: 16 },
+});
+`;
+
+const EXPO_RN_LAYOUT = `import { Stack } from 'expo-router';
+
+export default function Layout() {
+  return <Stack screenOptions={{ headerShown: false }} />;
+}
+`;
+
+const EXPO_RN_BABEL = `module.exports = function (api) {
+  api.cache(true);
+  return { presets: ['babel-preset-expo'] };
+};
+`;
+
+const EXPO_RN_PREVIEW = `<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=375,initial-scale=1"><title>{{NAME}} preview</title>
+<style>html,body{margin:0;background:#0b0d10;color:#e6e8eb;font-family:-apple-system,system-ui;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center}h1{font-size:28px;margin:0 0 8px}p{color:#9aa3ad;font-size:13px;line-height:1.5;max-width:300px}code{background:#1a1f25;padding:2px 6px;border-radius:4px;font-size:11px}</style>
+</head><body>
+<h1>{{NAME}}</h1>
+<p>Run <code>npm run web</code> in this worktree to start Expo's web bundler, then point the preview at <code>http://localhost:8081</code>.</p>
+<p style="margin-top:16px;font-size:11px;">This placeholder shows in the iPhone preview until <code>expo start --web</code> is running.</p>
+</body></html>
+`;
+
 const EXPRESS_API_PKG = `{
   "name": "{{NAME}}",
   "version": "0.0.1",
@@ -152,6 +241,20 @@ const TEMPLATES: Template[] = [
       'vite.config.js': REACT_VITE_VITE_CONFIG,
       'src/main.jsx': REACT_VITE_MAIN,
       'src/App.jsx': REACT_VITE_APP,
+      'README.md': README,
+    },
+    postInstall: ['npm install'],
+  },
+  {
+    name: 'expo-rn',
+    description: 'Expo + React Native + RN-Web. Targets iOS/Android/web; preview pane shows mobile viewport.',
+    files: {
+      'package.json': EXPO_RN_PKG,
+      'app.json': EXPO_RN_APP_JSON,
+      'babel.config.js': EXPO_RN_BABEL,
+      'app/_layout.tsx': EXPO_RN_LAYOUT,
+      'app/index.tsx': EXPO_RN_APP_INDEX,
+      'index.html': EXPO_RN_PREVIEW,
       'README.md': README,
     },
     postInstall: ['npm install'],

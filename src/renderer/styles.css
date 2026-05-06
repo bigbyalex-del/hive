@@ -240,11 +240,123 @@ body {
   min-height: 0;
 }
 .dpane.active { display: block; }
-#preview-pane.active { display: flex; padding: 0; }
+#preview-pane.active { display: flex; flex-direction: column; padding: 0; }
+
+/* Stage hosts the device frame; centred when type=ios, fills when type=web */
+#preview-stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+  justify-content: stretch;
+  background: var(--panel-2);
+  overflow: auto;
+}
+#preview-device {
+  position: relative;
+  flex: 1;
+  display: flex;
+}
 #preview-frame {
   flex: 1;
   border: 0;
   background: white;
+  width: 100%;
+  height: 100%;
+}
+#preview-notch, #preview-home { display: none; }
+#annot-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  cursor: crosshair;
+}
+#annot-canvas.drawing { pointer-events: auto; }
+
+/* iOS mode — wrap iframe in iPhone 15-ish bezel */
+body.ptype-ios #preview-stage {
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+}
+body.ptype-ios #preview-device {
+  flex: 0 0 auto;
+  width: 375px;
+  height: 600px;
+  max-height: calc(100% - 36px);
+  background: #000;
+  border-radius: 38px;
+  padding: 10px;
+  box-shadow: 0 0 0 2px #1f2937, 0 18px 40px rgba(0,0,0,0.55), inset 0 0 0 1px #2a3445;
+}
+body.ptype-ios #preview-frame {
+  width: 100%;
+  height: 100%;
+  border-radius: 28px;
+  background: white;
+}
+body.ptype-ios #annot-canvas {
+  inset: 10px;
+  width: calc(100% - 20px);
+  height: calc(100% - 20px);
+  border-radius: 28px;
+}
+body.ptype-ios #preview-notch {
+  display: block;
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 110px;
+  height: 26px;
+  background: #000;
+  border-radius: 14px;
+  z-index: 2;
+}
+body.ptype-ios #preview-home {
+  display: block;
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 130px;
+  height: 4px;
+  background: rgba(255,255,255,0.85);
+  border-radius: 2px;
+  z-index: 2;
+}
+
+/* Annotation comment row */
+#annot-comment-row {
+  display: flex;
+  gap: 6px;
+  padding: 6px 10px;
+  border-top: 1px solid var(--border);
+  background: var(--panel-2);
+  flex-shrink: 0;
+}
+#annot-comment {
+  flex: 1;
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 3px;
+  outline: none;
+}
+#annot-comment:focus { border-color: var(--accent); }
+#annot-worker {
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 11px;
+  padding: 4px 6px;
+  border-radius: 3px;
 }
 .activity-row {
   display: grid;

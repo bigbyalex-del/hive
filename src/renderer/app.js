@@ -213,14 +213,11 @@ document.querySelectorAll('.dtab').forEach(btn => {
     document.querySelectorAll('.dpane').forEach(p => p.classList.remove('active'));
     document.getElementById(btn.dataset.tab + '-pane').classList.add('active');
     setDrawerExpanded(true);
-    if (btn.dataset.tab === 'preview') {
-      previewSource.style.display = 'inline-block';
-      document.getElementById('preview-popout').style.display = 'inline';
-      refreshPreviewSources();
-    } else {
-      previewSource.style.display = 'none';
-      document.getElementById('preview-popout').style.display = 'none';
-    }
+    const onPreview = btn.dataset.tab === 'preview';
+    previewSource.style.display = onPreview ? 'inline-block' : 'none';
+    document.getElementById('preview-popout').style.display = onPreview ? 'inline' : 'none';
+    document.getElementById('annotate-tools').style.display = onPreview ? 'inline-flex' : 'none';
+    if (onPreview) refreshPreviewSources();
   });
 });
 
@@ -758,4 +755,180 @@ document.getElementById('open-templates').addEventListener('click', async (e) =>
 document.getElementById('close-templates').addEventListener('click', (e) => {
   e.preventDefault();
   templatesModal.style.display = 'none';
+});
+
+// ---- project type ---------------------------------------------------------
+// Drives preview chrome (iPhone bezel for ios) and prefixes dispatched tasks
+// with a viewport hint so workers target the right form factor.
+const PROJECT_TYPES = ['web', 'ios', 'api'];
+const projectTypeSel = document.getElementById('project-type');
+let projectType = (() => {
+  const saved = localStorage.getItem('hive.projectType');
+  return PROJECT_TYPES.includes(saved) ? saved : 'web';
+})();
+function applyProjectType(t) {
+  projectType = t;
+  localStorage.setItem('hive.projectType', t);
+  projectTypeSel.value = t;
+  document.body.classList.remove('ptype-web', 'ptype-ios', 'ptype-api');
+  document.body.classList.add('ptype-' + t);
+  resizeAnnotCanvas();
+}
+projectTypeSel.addEventListener('change', () => applyProjectType(projectTypeSel.value));
+applyProjectType(projectType);
+
+// Auto-bump project type when user scaffolds a template that implies one.
+const TPL_TO_TYPE = { 'expo-rn': 'ios', 'html-spa': 'web', 'react-vite': 'web', 'express-api': 'api' };
+const _origScaffold = window.hive.scaffoldTemplate;
+window.hive.scaffoldTemplate = async (workerId, tplName, projectName) => {
+  const r = await _origScaffold(workerId, tplName, projectName);
+  if (r?.ok && TPL_TO_TYPE[tplName]) applyProjectType(TPL_TO_TYPE[tplName]);
+  return r;
+};
+
+// Prefix the user's task with a project-type hint so Manager + workers know
+// the target form factor without a separate IPC parameter.
+const _origRunTask = window.hive.runTask;
+window.hive.runTask = (task, imageDataUrl) => {
+  const hint = projectType === 'ios'
+    ? '[project: iOS app — design for 375×812 mobile viewport, iOS-style components, RN/Expo if scaffolded]\n'
+    : projectType === 'api'
+      ? '[project: API service — JSON endpoints, no UI]\n'
+      : '';
+  return _origRunTask(hint + task, imageDataUrl);
+};
+
+// ---- annotation overlay ---------------------------------------------------
+// Canvas sits on top of the preview iframe. User toggles drawing on, draws
+// strokes, optionally types a comment, sends → packs strokes as PNG and
+// fires a follow-up runTask with the image attached. Worker sees redlines.
+const annotCanvas = document.getElementById('annot-canvas');
+const annotCtx = annotCanvas.getContext('2d');
+const annotToggleBtn = document.getElementById('annot-toggle');
+const annotClearBtn = document.getElementById('annot-clear');
+const annotSendBtn = document.getElementById('annot-send');
+const annotCommentRow = document.getElementById('annot-comment-row');
+const annotCommentInput = document.getElementById('annot-comment');
+const annotWorkerSel = document.getElementById('annot-worker');
+let annotDrawing = false;
+let annotHasStrokes = false;
+let annotMode = false;
+
+function resizeAnnotCanvas() {
+  const rect = annotCanvas.getBoundingClientRect();
+  if (rect.width === 0 || rect.height === 0) return;
+  // Preserve any existing strokes during resize by snapshotting → drawing back
+  const prev = annotHasStrokes ? annotCanvas.toDataURL() : null;
+  const dpr = window.devicePixelRatio || 1;
+  annotCanvas.width = rect.width * dpr;
+  annotCanvas.height = rect.height * dpr;
+  annotCtx.scale(dpr, dpr);
+  annotCtx.lineCap = 'round';
+  annotCtx.lineJoin = 'round';
+  annotCtx.strokeStyle = '#ff3b30';
+  annotCtx.lineWidth = 3;
+  if (prev) {
+    const img = new Image();
+    img.onload = () => annotCtx.drawImage(img, 0, 0, rect.width, rect.height);
+    img.src = prev;
+  }
+}
+window.addEventListener('resize', resizeAnnotCanvas);
+// First paint after layout settles
+requestAnimationFrame(() => requestAnimationFrame(resizeAnnotCanvas));
+
+function setAnnotMode(on) {
+  annotMode = on;
+  annotCanvas.classList.toggle('drawing', on);
+  annotToggleBtn.style.background = on ? 'var(--accent)' : '';
+  annotToggleBtn.style.color = on ? '#00171f' : '';
+  annotToggleBtn.textContent = on ? '✎ drawing' : '✎ mark up';
+  annotClearBtn.style.display = on ? 'inline-block' : 'none';
+  annotSendBtn.style.display = on ? 'inline-block' : 'none';
+  annotCommentRow.style.display = on ? 'flex' : 'none';
+  if (on) resizeAnnotCanvas();
+}
+annotToggleBtn.addEventListener('click', () => setAnnotMode(!annotMode));
+annotClearBtn.addEventListener('click', () => {
+  annotCtx.clearRect(0, 0, annotCanvas.width, annotCanvas.height);
+  annotHasStrokes = false;
+});
+
+let annotPath = null;
+annotCanvas.addEventListener('pointerdown', (e) => {
+  if (!annotMode) return;
+  annotCanvas.setPointerCapture(e.pointerId);
+  annotDrawing = true;
+  const r = annotCanvas.getBoundingClientRect();
+  annotPath = { x: e.clientX - r.left, y: e.clientY - r.top };
+  annotCtx.beginPath();
+  annotCtx.moveTo(annotPath.x, annotPath.y);
+});
+annotCanvas.addEventListener('pointermove', (e) => {
+  if (!annotDrawing) return;
+  const r = annotCanvas.getBoundingClientRect();
+  const x = e.clientX - r.left, y = e.clientY - r.top;
+  annotCtx.lineTo(x, y);
+  annotCtx.stroke();
+  annotHasStrokes = true;
+});
+annotCanvas.addEventListener('pointerup', () => { annotDrawing = false; });
+annotCanvas.addEventListener('pointercancel', () => { annotDrawing = false; });
+
+// Compose preview screenshot (iframe HTML rendered via html2canvas-style trick
+// is heavy — instead we composite the iframe's srcdoc DataURL with the canvas
+// strokes by drawing the iframe's body via getComputedStyle is impractical.
+// Pragmatic approach: ship the strokes-only PNG plus the raw HTML in the
+// comment so the worker can re-render and overlay mentally. Most cases the
+// comment + strokes is enough; a worker reading the HTML it just wrote can
+// map coordinates back.
+async function sendAnnotation() {
+  if (!annotHasStrokes && !annotCommentInput.value.trim()) {
+    annotCommentInput.focus();
+    return;
+  }
+  const comment = annotCommentInput.value.trim() || 'Address the redlines on the preview.';
+  const targetWorker = annotWorkerSel.value;
+
+  // Pack strokes as PNG with a transparent background so the worker can see
+  // shape + position. Add a faint grid so coordinates make sense without the
+  // underlying iframe content.
+  const out = document.createElement('canvas');
+  out.width = annotCanvas.width;
+  out.height = annotCanvas.height;
+  const octx = out.getContext('2d');
+  octx.fillStyle = 'rgba(255,255,255,0.96)';
+  octx.fillRect(0, 0, out.width, out.height);
+  // Faint grid every 50 logical px for spatial reference
+  octx.strokeStyle = 'rgba(0,0,0,0.08)';
+  octx.lineWidth = 1;
+  const dpr = window.devicePixelRatio || 1;
+  for (let x = 0; x < out.width; x += 50 * dpr) {
+    octx.beginPath(); octx.moveTo(x, 0); octx.lineTo(x, out.height); octx.stroke();
+  }
+  for (let y = 0; y < out.height; y += 50 * dpr) {
+    octx.beginPath(); octx.moveTo(0, y); octx.lineTo(out.width, y); octx.stroke();
+  }
+  octx.drawImage(annotCanvas, 0, 0);
+  const dataUrl = out.toDataURL('image/png');
+
+  const enriched = `[redline annotation on ${projectType} preview${targetWorker !== 'auto' ? ` — target ${targetWorker}` : ''}]\n${comment}\n\nThe attached image shows the user's drawn marks on the current preview. Coordinates are in screen pixels (375×812 viewport when iOS).`;
+
+  micStatus.textContent = '✎ sending annotation…';
+  try {
+    const res = await window.hive.runTask(enriched, dataUrl);
+    if (!res.ok) appendLog('M', '✗ ' + res.error);
+    micStatus.textContent = '';
+    // Reset overlay after dispatch
+    annotCtx.clearRect(0, 0, annotCanvas.width, annotCanvas.height);
+    annotHasStrokes = false;
+    annotCommentInput.value = '';
+    setAnnotMode(false);
+  } catch (err) {
+    micStatus.textContent = '✗ ' + err.message;
+  }
+}
+annotSendBtn.addEventListener('click', sendAnnotation);
+annotCommentInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') sendAnnotation();
 });

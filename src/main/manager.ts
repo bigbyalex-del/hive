@@ -36,6 +36,7 @@ Rules:
 - Never split sequential work into parallel (e.g. "build then test" — sequential, ONE item).
 - Never split work that touches the same file.
 - For pattern work (multiple similar pages, multiple similar fixes), fan out with haiku per item.
+- If the user's input begins with a tag like \`[project: iOS app — ...]\` or \`[redline annotation on ios preview — target W3]\`, treat its constraints as binding and **propagate them inside every subtask's "task" string** (so workers see the form-factor + viewport hints even after rephrase). When a tag pins a specific worker (e.g. \`target W3\`), emit a single dispatch — the orchestrator routes by index, so put the targeted task first and only.
 - Reply with ONLY the chosen mode's output. No explanation.`;
 
 export interface DispatchRecord {
