@@ -6,9 +6,99 @@ Started 2026-05-04. Owner: Alex.
 
 ---
 
-## 🌅 Next Session — pick up here (2026-05-07)
+## 🌅 Next Session — pick up here (2026-05-11)
 
-### 0. State as of end-of-day 2026-05-06
+### 0. State as of end-of-day 2026-05-10
+
+- **17 commits ahead of origin** — last push pre-`a46a0cd`. Ready to `git push`.
+- **Working tree:** clean.
+- **The big shift since 2026-05-06:** Hive is now first and foremost an **FXV advisor surface** (`mode-fxv-advise` is the default body class). The build-mode (workers + babysit + templates) is still wired and 1 line away — flip the body class to `mode-build` to restore — but day-to-day use is now domain-specialist chat, council, ship-audit, alert triage.
+
+### 1. v2.0 commits (2026-05-10)
+
+| # | Commit | Shipped |
+|---|---|---|
+| 1 | `f4c8de1` | **v2.0 backend** — `advisors.ts` (consultAdvisor + runCouncil + runShipAudit + extractActions; cite-[N]-or-refuse + Haiku citation linter), `alerts.ts` (GitHub/Sentry/Supabase pollers, ASC stub, classify-by-file → persona, dedupe, 10-min poll), `db.ts` alerts table + chunk helpers, `seed-fxv-personas.ts` (read FXV repo + curated CLAUDE memory → embed → chunks at project_id=NULL; auto-routing classifier persists Haiku decisions back to personas.json, capped at 30/run), `personas.json` (8 specialists + 4 page agents + 1 Programme Lead, each with scope, routing table, system prompt, seed_globs, memory_globs) |
+| 2 | `5bd1b5a` | **v2.0 UI** — `mode-fxv-advise` body class as default, 9 grid cells repurposed as clickable persona chats (colour-coded, scope blurb, last-reply preview), PAGES strip pills (Today/Programme/Coach/Health), brainstorm right-rail sidebar with NOTES/ACTIONS/ALERTS tabs, ADVISORS chat modal, COUNCIL fan-out modal with synthesis, SHIP AUDIT modal with parallel red/amber/green per domain, REFRESH MEMORY toast with live log, Run-button override that funnels to consultAdvisor('fxv:manager'), push-to-talk fix (skip space when typing in any input), TDZ fix on applyProjectType. Build-mode UI hidden behind `.mode-build-only` |
+
+### 2. Smoke-test list (do this first thing)
+
+1. `npm start` — should boot into FXV advisor mode. Titlebar shows ◆ FXV ADVISORS, ⚑ ship audit, ↻ refresh memory, £, ⚙ models. Build-mode buttons (◐ babysit, 📦 templates, ◈ advisors, theme toggle, project picker, snap/watch/spec/talk, etc.) should be hidden.
+2. **Cell click** — click any of the 9 grid cells, advisors modal opens with that persona pre-selected. Hover any cell, accent border lights up in the persona's colour.
+3. **PAGES pills** — click Today / Programme / Coach / Health, modal opens with that page agent pre-selected.
+4. **Refresh memory** — click ↻ refresh memory. Toast shows live log. Should ingest from `C:/Users/Fusion/.openclaw/workspace/fxv-performance` + `C:/Users/Fusion/.claude/projects/C--Users-Fusion/memory`. Expect ~30s, ~$0.005. Confirm `OPENAI_API_KEY` set in `hive/.env` first.
+5. **Ask the Programme Lead** — type "what should I prioritise this week" in the main input → Run. Modal opens with manager-led answer, sources cited [N], pulled from across every specialist's namespace.
+6. **Ask a specialist** — open Aerobic chat, ask "is polarised better than pyramidal for FXV users?" — confirm sources cite real FXV files + the methodology page.
+7. **COUNCIL** — type a question, click Council. Watch each specialist + page agent reply (parallel), then the Programme Lead synthesis lands. Costs ~£0.05.
+8. **SHIP AUDIT** — click ⚑ ship audit → RUN AUDIT. Each domain returns RED/AMBER/GREEN with up-to-3 blockers + mitigations. Overall verdict at top.
+9. **Brainstorm tabs** — pin a reply (◎ pin) → check NOTES tab. Wait a few seconds after a chat reply → check ACTIONS tab populated. ALERTS tab shows config status; click "poll now" if you've set GITHUB_TOKEN.
+
+### 3. Anti-hallucination layers (so you remember why each piece exists)
+
+1. **Recall-first.** Every reply pulls top-K chunks before generation. Manager pulls from every specialist namespace + shared; specialists pull from their own + shared.
+2. **Source-diversity cap.** Max 2 chunks per file so one verbose file (methodology.html) doesn't starve more relevant ones.
+3. **Inline numbered sources.** Every retrieved chunk arrives in the SYSTEM prompt as `[N] (Specialist) path\nbody`.
+4. **Strict cite-or-refuse rule.** SYSTEM tells the model: cite [N] after every fact, OR refuse with "I don't have a grounded source for this — would be guessing."
+5. **Haiku citation linter.** Splits the reply into sentences, flags any factual claim missing a [N], re-prompts the model once to rewrite with citations.
+6. **Routing tables in personas.json.** Each persona has a `routes_to` map; out-of-domain questions get redirected.
+
+### 4. Recommended next push (in priority order)
+
+**(a) Smoke-test on real FXV (~30 min)** — open the app, run the seed, ask a real question to each specialist. Likely to find: missing seed files (FXV repo path + persona globs drift over time), persona scopes that overlap, citation linter false-positives. Tighten as needed.
+
+**(b) Auto-router maintenance (~1 hr)** — the seed script's auto-routing happens at seed time only. After a big FXV refactor, new files won't be picked up until next seed. Consider a watch-mode that periodically re-runs `discoverAndRoute` (cheap — only Haiku-classifies new files).
+
+**(c) Persona context for advisor cells (~30 min)** — when the chat modal opens, the "scope" blurb is in the cell + chat header. Consider also showing chunk count (read from `countChunksForAgent`) so you know whether a persona has been seeded.
+
+**(d) Multi-turn improvement** — currently `recallForAdvisor` builds a retrieval query from the previous user turn + new turn. Works for short pronoun chains, weak for long conversations. Consider a sliding-window summary of the last 3 turns.
+
+**(e) Action urgency tuning (~30 min)** — Haiku's urgency calls are conservative. Consider feeding it the persona's scope so it knows what counts as urgent for that domain.
+
+**(f) Original NOTES roadmap items deferred** — Babysit hardening (~2hr), Tester role (~3hr), Personal preference memory port (~3hr), Exclusive file ownership table (~5hr). Build-mode still works but isn't the daily driver any more.
+
+### 5. Known issues carried forward
+
+- **Web Speech API dead in Electron** — Whisper-only.
+- **MCP fs rooted at `worktrees/`** — workers can't reach project-root files. Build-mode only; advisor mode unaffected.
+- **Audit log only covers Run + MCP** — Read/Write/Edit/BrowserTest not logged.
+- **Babysit `processed` set is in-memory only** — restart replays issues. Build-mode only.
+- **Project switch doesn't recreate per-project MCP fs root** — build-mode only.
+- **Pricing in `pricing.ts` is Jan 2026 USD × 0.80** — refresh quarterly.
+- **Sentry / Supabase / ASC pollers untested with live tokens** — wired but I haven't seen them ingest a real alert. Test before relying on the ALERTS tab.
+- **Auto-router runs on every `seed:fxv`** — fast but Haiku-bills per new file. If you nuke `personas.json` and re-seed, expect 30 classifications. Cap is `MAX_CLASSIFY_PER_RUN = 30`.
+
+### 6. Costs (advisor mode, observed)
+
+| Action | Approx GBP | Token notes |
+|---|---|---|
+| Single specialist reply | £0.005 | Sonnet, 6 sources × ~600 tokens, 2-4 sentence reply |
+| Council (12 agents + synthesis) | £0.05 | 12 parallel Sonnet calls + 1 synthesis |
+| Ship audit (12 agents) | £0.05 | Same shape as Council |
+| Action extraction | negligible | Haiku, fire-and-forget |
+| Memory refresh (full reseed) | $0.005 | OpenAI text-embedding-3-small × ~400 chunks |
+
+### 7. File map for the new feature
+
+```
+hive/
+├── personas.json                    # 13 personas — single source of truth
+├── src/
+│   ├── main/
+│   │   ├── advisors.ts             # consultAdvisor / runCouncil / runShipAudit / extractActions
+│   │   ├── alerts.ts               # GH / Sentry / Supabase pollers + classify-by-file
+│   │   └── db.ts                   # + alerts table, deleteChunksForAgent, countChunksForAgent
+│   ├── scripts/
+│   │   └── seed-fxv-personas.ts    # FXV repo + memory → embed → chunks; auto-router
+│   └── renderer/
+│       ├── app.js                  # + advisor chat, council, ship audit, brainstorm sidebar
+│       ├── index.html              # + modals, page-bar, brainstorm rail, mode-fxv-advise body
+│       └── styles.css              # + page-pill, brainstorm, action-item, advisor-cell
+└── NOTES.md                         # this file
+```
+
+---
+
+## 🌅 Previous pickup (2026-05-07) — superseded
 
 - **13 commits ahead of origin** — last push was before `a46a0cd`. `git push` when comfortable.
 - **Working tree:** NOTES.md edits only (this update). Latest commit: `153454a` (v0.9 Babysit MVP).
