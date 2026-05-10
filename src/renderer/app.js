@@ -3373,6 +3373,128 @@ if (document.body.classList.contains('mode-fxv-advise')) {
   setTimeout(refreshDraftsRow, 700);
   setInterval(refreshDraftsRow, 30_000);
 }
+
+// ============================================================
+// CONTENT PIPELINE — generate next draft from queue
+// ============================================================
+
+const contentModal = document.getElementById('content-modal');
+const contentStageEl = document.getElementById('content-stage');
+const contentTopicLineEl = document.getElementById('content-topic-line');
+const contentLogEl = document.getElementById('content-log');
+const contentStatusEl = document.getElementById('content-status');
+const contentFooterEl = document.getElementById('content-footer');
+const contentOpenFolderBtn = document.getElementById('content-open-folder-btn');
+const contentDoneBtn = document.getElementById('content-done-btn');
+const generateDraftLink = document.getElementById('generate-draft');
+
+let contentRunning = false;
+let contentLastDraftSlug = null;
+let contentProgressUnsub = null;
+
+function setContentStage(label) {
+  contentStageEl.textContent = label.toUpperCase();
+}
+
+function appendContentLog(line) {
+  contentLogEl.textContent += line + '\n';
+  contentLogEl.scrollTop = contentLogEl.scrollHeight;
+}
+
+function attachContentProgressListener() {
+  if (contentProgressUnsub) try { contentProgressUnsub(); } catch { /* fine */ }
+  contentProgressUnsub = window.hive.onContentDraftProgress((evt) => {
+    if (!evt) return;
+    if (evt.type === 'start') {
+      setContentStage('research');
+      contentTopicLineEl.innerHTML = `Topic: <strong>${escapeHtml(evt.topic.title)}</strong> · ${escapeHtml(evt.topic.personas.join(', '))} · ${escapeHtml(evt.topic.hero_template)}`;
+      appendContentLog(`[start] picked: ${evt.topic.slug}`);
+      contentLastDraftSlug = evt.topic.slug;
+    } else if (evt.type === 'stage') {
+      setContentStage(evt.stage.replace(/-/g, ' '));
+      appendContentLog(evt.line);
+    } else if (evt.type === 'done') {
+      setContentStage('done');
+      const secs = (evt.durationMs / 1000).toFixed(1);
+      appendContentLog(`[done] ${secs}s — draft at ${evt.draftPath}`);
+    } else if (evt.type === 'error') {
+      setContentStage('failed');
+      appendContentLog(`[error] [${evt.stage}] ${evt.error}`);
+    }
+  });
+}
+
+function detachContentProgressListener() {
+  if (contentProgressUnsub) try { contentProgressUnsub(); } catch { /* fine */ }
+  contentProgressUnsub = null;
+}
+
+generateDraftLink.addEventListener('click', async (e) => {
+  e.preventDefault();
+  if (contentRunning) {
+    contentModal.style.display = 'flex';
+    return;
+  }
+  // Confirm before spending — pipeline costs ~£0.10 per run
+  const queueRes = await window.hive.getContentQueue().catch(() => null);
+  let queueLine = '';
+  if (queueRes && queueRes.ok && queueRes.queue) {
+    if (queueRes.queue.isLocked) {
+      alert('Pipeline is already running (or a stale lock exists in fxv-content/.in-progress.json). Wait for it, or remove the lockfile and retry.');
+      return;
+    }
+    if (queueRes.queue.count === 0) {
+      queueLine = 'Queue is empty — pipeline will refill from seed-topics.json then pick the highest-priority topic.';
+    } else {
+      const top = queueRes.queue.topics[0];
+      queueLine = `Next topic: "${top.title}" (priority: ${top.priority})`;
+    }
+  }
+  if (!confirm(`Generate next content draft now?\n\n${queueLine}\n\nThis will:\n  • consult specialist personas for research (~30s)\n  • write the post + render hero MP4 (~60-90s)\n  • generate IG / TikTok / Twitter bundles (~30s)\n\nTotal ~3-5 min, ~£0.10 in API spend.`)) return;
+
+  contentRunning = true;
+  contentLastDraftSlug = null;
+  contentLogEl.textContent = '';
+  contentTopicLineEl.innerHTML = '<span style="color:var(--muted);font-style:italic;">picking topic from queue...</span>';
+  contentStatusEl.innerHTML = '<span style="color:var(--accent);">running...</span>';
+  contentOpenFolderBtn.style.display = 'none';
+  contentModal.style.display = 'flex';
+  setContentStage('pick');
+  attachContentProgressListener();
+
+  try {
+    const res = await window.hive.generateNextDraft();
+    detachContentProgressListener();
+    if (res && res.ok) {
+      const secs = ((res.durationMs || 0) / 1000).toFixed(1);
+      contentStatusEl.innerHTML = `<span style="color:var(--success,#4ade80);font-weight:700;">✓ DRAFTED</span> in ${secs}s — appearing in drafts row now`;
+      contentOpenFolderBtn.style.display = 'inline-block';
+      // Refresh drafts row so the new card pulses in
+      if (typeof refreshDraftsRow === 'function') refreshDraftsRow();
+    } else {
+      contentStatusEl.innerHTML = `<span style="color:var(--error);font-weight:700;">✗ FAILED</span> — ${escapeHtml(res?.error || 'unknown')}`;
+    }
+  } catch (err) {
+    detachContentProgressListener();
+    contentStatusEl.innerHTML = `<span style="color:var(--error);font-weight:700;">✗ ERROR</span> — ${escapeHtml(err?.message || String(err))}`;
+  } finally {
+    contentRunning = false;
+  }
+});
+
+contentOpenFolderBtn.addEventListener('click', () => {
+  if (contentLastDraftSlug) window.hive.openDraftFolder(contentLastDraftSlug).catch(() => {});
+});
+contentDoneBtn.addEventListener('click', () => {
+  contentModal.style.display = 'none';
+});
+document.getElementById('close-content').addEventListener('click', (e) => {
+  e.preventDefault();
+  contentModal.style.display = 'none';
+});
+contentModal.addEventListener('click', (e) => {
+  if (e.target === contentModal && !contentRunning) contentModal.style.display = 'none';
+});
 // Refresh after any chat reply
 const _origExtractActionsFor = window.__extractActionsFor;
 window.__extractActionsFor = async (personaId, question, reply) => {

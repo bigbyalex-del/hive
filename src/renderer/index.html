@@ -35,6 +35,7 @@
         <button data-theme="lab" class="active" type="button">LAB</button>
         <button data-theme="premium" type="button">PREMIUM</button>
       </span>
+      <a href="#" id="generate-draft" style="color:#c084fc;text-decoration:none;margin-right:10px;" title="Generate the next blog + hero video + social bundles from queue.json. ~3-5 min. ~£0.10.">▣ generate draft</a>
       <a href="#" id="open-deploy" style="color:var(--accent);text-decoration:none;margin-right:10px;" title="Ship FXV — preview/production OTA with safety gates and rollback prep">⏏ deploy</a>
       <a href="#" id="open-ship-audit" style="color:var(--accent);text-decoration:none;margin-right:10px;" title="Run every specialist + page agent against a ship-blocker checklist. ~£0.05.">⚑ ship audit</a>
       <a href="#" id="refresh-seeds" style="color:var(--accent);text-decoration:none;margin-right:10px;" title="Re-embed all FXV repo files + curated CLAUDE memory into specialist namespaces. ~30s, $0.005.">↻ refresh memory</a>
@@ -292,6 +293,27 @@
       </div>
       <div id="ship-audit-status" style="padding:6px 18px;font-size:11px;color:var(--muted);border-bottom:1px solid var(--border);min-height:14px;">Click RUN AUDIT to scan every agent's domain for ship-blockers.</div>
       <div id="ship-audit-grid" style="flex:1;overflow:auto;padding:14px;display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;align-content:start;"></div>
+    </div>
+  </div>
+
+  <div id="content-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:10;align-items:center;justify-content:center;">
+    <div style="background:var(--panel);border:1px solid var(--border-strong);border-radius:8px;width:780px;max-width:96vw;height:78vh;display:flex;flex-direction:column;overflow:hidden;">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-bottom:1px solid var(--border);">
+        <div style="display:flex;align-items:center;gap:14px;">
+          <strong style="color:#c084fc;letter-spacing:1px;">▣ GENERATE DRAFT</strong>
+          <span id="content-stage" style="font-size:10px;color:var(--muted);letter-spacing:1px;">PICK</span>
+        </div>
+        <a href="#" id="close-content" style="color:var(--muted);text-decoration:none;">✕</a>
+      </div>
+      <div id="content-topic-line" style="padding:14px 18px;border-bottom:1px solid var(--border);font-size:12px;color:var(--text);min-height:14px;"></div>
+      <pre id="content-log" style="margin:0;flex:1;background:var(--panel-2);border:none;padding:12px 18px;font-size:10px;line-height:1.55;overflow:auto;white-space:pre-wrap;color:var(--text);"></pre>
+      <div id="content-footer" style="padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:10px;">
+        <div id="content-status" style="font-size:11px;color:var(--muted);"></div>
+        <div style="display:flex;gap:8px;">
+          <button id="content-open-folder-btn" type="button" style="display:none;background:#c084fc;border:none;color:#00171f;font-weight:700;padding:6px 14px;border-radius:4px;cursor:pointer;font-family:inherit;font-size:11px;">OPEN DRAFT</button>
+          <button id="content-done-btn" type="button" style="background:var(--panel-2);border:1px solid var(--border-strong);color:var(--text);padding:6px 14px;border-radius:4px;cursor:pointer;font-family:inherit;font-size:11px;">CLOSE</button>
+        </div>
+      </div>
     </div>
   </div>
 

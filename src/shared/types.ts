@@ -94,6 +94,9 @@ export const IPC = {
   ListDrafts: 'hive:list-drafts',
   OpenDraftFolder: 'hive:open-draft-folder',
   OpenDraftHero: 'hive:open-draft-hero',
+  GenerateNextDraft: 'hive:generate-next-draft',
+  GetContentQueue: 'hive:get-content-queue',
+  ContentDraftProgress: 'hive:content-draft-progress',
 } as const;
 
 export type AgentEvent =

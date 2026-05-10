@@ -24,6 +24,7 @@ import { extractIntent as deployExtractIntent, preparePlan as deployPreparePlan,
 import { getPulse as pulseGet, markPulseSeen as pulseMarkSeen } from './pulse';
 import { listChatsForPersona, previewByPersona } from './db';
 import { listDrafts as draftsList, openDraftFolderInExplorer, openHeroInPlayer } from './drafts';
+import { generateNextDraft as pipelineGenerate, getQueueSummary as pipelineGetQueue } from './contentPipeline';
 
 dotenv.config({ path: path.join(__dirname, '..', '..', '.env') });
 
@@ -557,6 +558,22 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle(IPC.OpenDraftFolder, (_e, slug: string) => openDraftFolderInExplorer(String(slug ?? '')));
   ipcMain.handle(IPC.OpenDraftHero, (_e, slug: string) => openHeroInPlayer(String(slug ?? '')));
+
+  // ---- Content pipeline ----------------------------------------------
+  ipcMain.handle(IPC.GenerateNextDraft, async () => {
+    try {
+      const res = await pipelineGenerate({
+        onProgress: (evt) => mainWindow?.webContents.send(IPC.ContentDraftProgress, evt),
+      });
+      return res;
+    } catch (err: any) {
+      return { ok: false, draftPath: null, durationMs: 0, error: err?.message ?? String(err) };
+    }
+  });
+  ipcMain.handle(IPC.GetContentQueue, () => {
+    try { return { ok: true, queue: pipelineGetQueue() }; }
+    catch (err: any) { return { ok: false, error: err?.message ?? String(err) }; }
+  });
 
   ipcMain.handle(IPC.GetWorkerDiff, async (_e, workerId: string) => {
     try {

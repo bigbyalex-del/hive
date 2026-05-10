@@ -68,6 +68,9 @@ const IPC = {
   ListDrafts: 'hive:list-drafts',
   OpenDraftFolder: 'hive:open-draft-folder',
   OpenDraftHero: 'hive:open-draft-hero',
+  GenerateNextDraft: 'hive:generate-next-draft',
+  GetContentQueue: 'hive:get-content-queue',
+  ContentDraftProgress: 'hive:content-draft-progress',
 };
 
 contextBridge.exposeInMainWorld('hive', {
@@ -163,6 +166,13 @@ contextBridge.exposeInMainWorld('hive', {
   listDrafts: () => ipcRenderer.invoke(IPC.ListDrafts),
   openDraftFolder: (slug: string) => ipcRenderer.invoke(IPC.OpenDraftFolder, slug),
   openDraftHero: (slug: string) => ipcRenderer.invoke(IPC.OpenDraftHero, slug),
+  generateNextDraft: () => ipcRenderer.invoke(IPC.GenerateNextDraft),
+  getContentQueue: () => ipcRenderer.invoke(IPC.GetContentQueue),
+  onContentDraftProgress: (cb: (evt: any) => void) => {
+    const listener = (_: Electron.IpcRendererEvent, evt: any) => cb(evt);
+    ipcRenderer.on(IPC.ContentDraftProgress, listener);
+    return () => ipcRenderer.removeListener(IPC.ContentDraftProgress, listener);
+  },
   onBabysitLog: (cb: (line: string) => void) => {
     const listener = (_: Electron.IpcRendererEvent, line: string) => cb(line);
     ipcRenderer.on(IPC.BabysitLog, listener);
