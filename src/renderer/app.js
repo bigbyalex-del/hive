@@ -2420,3 +2420,328 @@ advisorInput.addEventListener('keydown', (e) => {
     sendAdvisorMessage();
   }
 });
+
+// ----- Deploy modal -----
+// Three panes (intent → plan → execute) plus a history pane. The plan pane
+// is the safety gate: blockers prevent SHIP entirely, production requires
+// typing the literal word "production" into a confirm input. The execute
+// pane streams live log lines from the main process via DeployLog IPC.
+
+const deployModal = document.getElementById('deploy-modal');
+const deployStageEl = document.getElementById('deploy-stage');
+const deployIntentInput = document.getElementById('deploy-intent-input');
+const deployMessageInput = document.getElementById('deploy-message-input');
+const deploySkipTypecheck = document.getElementById('deploy-skip-typecheck');
+const deployPrepareBtn = document.getElementById('deploy-prepare-btn');
+const deployPrepareLog = document.getElementById('deploy-prepare-log');
+const deployShipBtn = document.getElementById('deploy-ship-btn');
+const deployBackBtn = document.getElementById('deploy-back-btn');
+const deployConfirmInput = document.getElementById('deploy-confirm-input');
+const deployConfirmPrompt = document.getElementById('deploy-confirm-prompt');
+const deployExecuteHeader = document.getElementById('deploy-execute-header');
+const deployExecuteLog = document.getElementById('deploy-execute-log');
+const deployExecuteStatus = document.getElementById('deploy-execute-status');
+const deployExecuteFooter = document.getElementById('deploy-execute-footer');
+const deployRollbackBtn = document.getElementById('deploy-rollback-btn');
+const deployDoneBtn = document.getElementById('deploy-done-btn');
+const deployHistoryLink = document.getElementById('deploy-history-link');
+const deployHistoryList = document.getElementById('deploy-history-list');
+
+const deployState = {
+  channel: 'preview',
+  plan: null,
+  lastResult: null,
+  busy: false,
+};
+
+function setDeployStage(stage) {
+  deployStageEl.textContent = stage.toUpperCase();
+  for (const p of document.querySelectorAll('#deploy-modal .deploy-pane')) p.style.display = 'none';
+  const target = document.getElementById('deploy-pane-' + stage);
+  if (target) target.style.display = 'flex';
+}
+
+function setDeployChannel(ch) {
+  deployState.channel = ch;
+  document.querySelectorAll('.deploy-channel-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.channel === ch);
+  });
+}
+document.querySelectorAll('.deploy-channel-btn').forEach(btn => {
+  btn.addEventListener('click', () => setDeployChannel(btn.dataset.channel));
+});
+
+document.getElementById('open-deploy').addEventListener('click', (e) => {
+  e.preventDefault();
+  deployModal.style.display = 'flex';
+  setDeployStage('intent');
+  // Default to preview every open — production should never be sticky.
+  setDeployChannel('preview');
+  deployIntentInput.focus();
+});
+document.getElementById('close-deploy').addEventListener('click', (e) => {
+  e.preventDefault();
+  deployModal.style.display = 'none';
+});
+deployModal.addEventListener('click', (e) => {
+  if (e.target === deployModal) deployModal.style.display = 'none';
+});
+
+deployIntentInput.addEventListener('input', () => {
+  const text = deployIntentInput.value.trim();
+  if (!text || deployMessageInput.dataset.touched === '1') return;
+  if (deployIntentInput._t) clearTimeout(deployIntentInput._t);
+  deployIntentInput._t = setTimeout(async () => {
+    try {
+      const res = await window.hive.extractDeployIntent(text);
+      if (!res || !res.ok) return;
+      if (deployMessageInput.dataset.touched !== '1') {
+        deployMessageInput.value = res.message || '';
+      }
+      // Pre-flip channel only if the user said "production" / "prod" — the
+      // LLM doesn't get to silently escalate.
+      if (res.llmGuessedProduction && deployState.channel !== 'production') {
+        setDeployChannel('production');
+      }
+    } catch { /* fine */ }
+  }, 700);
+});
+deployMessageInput.addEventListener('input', () => {
+  deployMessageInput.dataset.touched = '1';
+});
+deployIntentInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+    e.preventDefault();
+    deployPrepareBtn.click();
+  }
+});
+
+let deployLogUnsub = null;
+function attachDeployLog(target) {
+  if (deployLogUnsub) try { deployLogUnsub(); } catch { /* fine */ }
+  deployLogUnsub = window.hive.onDeployLog((line) => {
+    if (!target) return;
+    target.textContent += line + '\n';
+    target.scrollTop = target.scrollHeight;
+  });
+}
+function detachDeployLog() {
+  if (deployLogUnsub) try { deployLogUnsub(); } catch { /* fine */ }
+  deployLogUnsub = null;
+}
+
+deployPrepareBtn.addEventListener('click', async () => {
+  if (deployState.busy) return;
+  const message = (deployMessageInput.value || '').trim();
+  if (!message) {
+    deployMessageInput.focus();
+    deployMessageInput.placeholder = 'message is required — what changed?';
+    return;
+  }
+  deployState.busy = true;
+  deployPrepareBtn.disabled = true;
+  deployPrepareBtn.style.opacity = '0.5';
+  deployPrepareBtn.textContent = 'PREPARING…';
+  deployPrepareLog.style.display = 'block';
+  deployPrepareLog.textContent = '';
+  attachDeployLog(deployPrepareLog);
+  try {
+    const res = await window.hive.prepareDeploy({
+      project: 'fxv',
+      channel: deployState.channel,
+      message,
+      skipTypecheck: !!deploySkipTypecheck.checked,
+    });
+    detachDeployLog();
+    if (!res || !res.ok) {
+      deployPrepareLog.textContent += '\n[ERROR] ' + ((res && res.error) || 'unknown');
+      return;
+    }
+    deployState.plan = res.plan;
+    renderPlanPane(res.plan);
+    setDeployStage('plan');
+  } catch (err) {
+    deployPrepareLog.textContent += '\n[ERROR] ' + (err.message || String(err));
+  } finally {
+    deployState.busy = false;
+    deployPrepareBtn.disabled = false;
+    deployPrepareBtn.style.opacity = '';
+    deployPrepareBtn.textContent = 'PREPARE';
+  }
+});
+
+function renderPlanPane(plan) {
+  const headerEl = document.getElementById('deploy-plan-header');
+  const channelColor = plan.channel === 'production' ? 'var(--error)' : 'var(--accent)';
+  headerEl.innerHTML = `
+    <div style="display:flex;align-items:center;gap:10px;">
+      <span style="font-size:10px;background:${channelColor};color:#00171f;padding:2px 10px;border-radius:10px;font-weight:700;letter-spacing:0.5px;">${escapeHtml(plan.channel.toUpperCase())}</span>
+      <span style="font-size:13px;color:var(--text);font-weight:600;">"${escapeHtml(plan.message)}"</span>
+    </div>
+    <span style="font-size:10px;color:var(--muted);">plan ${plan.planId.slice(0, 12)} · ${Math.round((plan.expiresAt - Date.now()) / 1000)}s ttl</span>
+  `;
+  const preflightEl = document.getElementById('deploy-preflight-list');
+  preflightEl.innerHTML = plan.preflight.map(c => {
+    const cls = c.ok ? 'ok' : (c.blocking ? 'fail-blocking' : 'fail-warning');
+    const icon = c.ok ? '✓' : (c.blocking ? '✗' : '⚠');
+    const detail = c.detail ? '<div class="pf-detail">' + escapeHtml(c.detail) + '</div>' : '';
+    return `<div class="deploy-preflight-row ${cls}"><span class="pf-icon">${icon}</span><div style="flex:1;"><span class="pf-name">${escapeHtml(c.name)}</span>${detail}</div></div>`;
+  }).join('');
+  document.getElementById('deploy-diff-summary').textContent = plan.diff.summary;
+  document.getElementById('deploy-diff-meta').textContent = `${plan.diff.commitCount} commit(s), ${plan.diff.changedFiles.length} file(s) on ${plan.diff.branch} · since ${plan.diff.sinceSha ? plan.diff.sinceSha.slice(0, 8) : '(no prior ship on this channel)'} → ${plan.diff.toSha.slice(0, 8)}`;
+  const rb = document.getElementById('deploy-rollback-prep');
+  if (plan.rollbackPrep.captured) {
+    rb.innerHTML = `<span style="color:var(--success,#4ade80);">✓</span> rollback target captured: <code style="font-size:10px;background:var(--panel-2);padding:2px 6px;border-radius:3px;">${escapeHtml(plan.rollbackPrep.previousGroupId.slice(0, 16))}…</code> — "${escapeHtml(plan.rollbackPrep.previousMessage || '(no message)')}"`;
+  } else {
+    rb.innerHTML = `<span style="color:var(--waiting);">⚠</span> no prior update group on this channel — rollback won't be available for this ship`;
+  }
+  const blockersWrap = document.getElementById('deploy-blockers-wrap');
+  const warningsWrap = document.getElementById('deploy-warnings-wrap');
+  if (plan.blockers.length) {
+    blockersWrap.style.display = 'block';
+    document.getElementById('deploy-blockers-list').innerHTML = plan.blockers.map(b => '<li>' + escapeHtml(b) + '</li>').join('');
+  } else { blockersWrap.style.display = 'none'; }
+  if (plan.warnings.length) {
+    warningsWrap.style.display = 'block';
+    document.getElementById('deploy-warnings-list').innerHTML = plan.warnings.map(w => '<li>' + escapeHtml(w) + '</li>').join('');
+  } else { warningsWrap.style.display = 'none'; }
+  if (plan.channel === 'production') {
+    deployConfirmInput.style.display = 'block';
+    deployConfirmInput.value = '';
+    deployConfirmInput.placeholder = 'type "production" to confirm';
+    deployConfirmPrompt.innerHTML = '<span style="color:var(--error);font-weight:700;">PRODUCTION SHIP</span> — type the literal word <code>production</code> below to enable the SHIP button.';
+  } else {
+    deployConfirmInput.style.display = 'none';
+    deployConfirmInput.value = 'ship';
+    deployConfirmPrompt.textContent = 'PREVIEW ship — click SHIP to push. Hits the preview channel, not real users.';
+  }
+  updateShipButtonState();
+}
+
+function updateShipButtonState() {
+  const plan = deployState.plan;
+  if (!plan) return;
+  const blocked = plan.blockers.length > 0;
+  let confirmOk = true;
+  if (plan.channel === 'production') {
+    confirmOk = deployConfirmInput.value.trim().toLowerCase() === 'production';
+  }
+  deployShipBtn.disabled = blocked || !confirmOk;
+  deployShipBtn.style.opacity = (blocked || !confirmOk) ? '0.4' : '';
+  deployShipBtn.style.cursor = (blocked || !confirmOk) ? 'not-allowed' : 'pointer';
+  deployShipBtn.textContent = blocked ? 'BLOCKED' : (plan.channel === 'production' ? 'SHIP TO PRODUCTION' : 'SHIP TO PREVIEW');
+}
+deployConfirmInput.addEventListener('input', updateShipButtonState);
+deployBackBtn.addEventListener('click', () => setDeployStage('intent'));
+
+deployShipBtn.addEventListener('click', async () => {
+  if (deployState.busy) return;
+  const plan = deployState.plan;
+  if (!plan) return;
+  const confirmation = plan.channel === 'production' ? deployConfirmInput.value.trim() : 'ship';
+  setDeployStage('execute');
+  deployExecuteHeader.innerHTML = `<span style="color:${plan.channel === 'production' ? 'var(--error)' : 'var(--accent)'};font-weight:700;">${escapeHtml(plan.channel.toUpperCase())}</span> · "${escapeHtml(plan.message)}" · plan ${plan.planId.slice(0, 12)}…`;
+  deployExecuteLog.textContent = '';
+  deployExecuteFooter.style.display = 'none';
+  attachDeployLog(deployExecuteLog);
+  deployState.busy = true;
+  try {
+    const res = await window.hive.executeDeploy({ planId: plan.planId, confirmation });
+    detachDeployLog();
+    deployState.lastResult = res;
+    deployExecuteFooter.style.display = 'flex';
+    if (res.ok) {
+      const smokeMsg = res.smoke ? (res.smoke.ok ? `smoke OK (${res.smoke.detail})` : `smoke MISMATCH (${res.smoke.detail})`) : 'no smoke';
+      deployExecuteStatus.innerHTML = `<span style="color:var(--success,#4ade80);font-weight:700;">✓ SHIPPED</span> in ${(res.durationMs / 1000).toFixed(1)}s — group <code style="font-size:10px;background:var(--panel-2);padding:1px 5px;border-radius:3px;">${escapeHtml(res.groupId ? res.groupId.slice(0, 12) + '…' : '?')}</code> — ${escapeHtml(smokeMsg)}`;
+      if (plan.rollbackPrep.captured && plan.rollbackPrep.previousGroupId) {
+        deployRollbackBtn.style.display = 'inline-block';
+        deployRollbackBtn.textContent = 'ROLLBACK TO ' + plan.rollbackPrep.previousGroupId.slice(0, 8) + '…';
+      }
+    } else {
+      deployExecuteStatus.innerHTML = `<span style="color:var(--error);font-weight:700;">✗ FAILED</span> — ${escapeHtml(res.error || 'unknown')}`;
+    }
+  } catch (err) {
+    detachDeployLog();
+    deployExecuteFooter.style.display = 'flex';
+    deployExecuteStatus.innerHTML = `<span style="color:var(--error);font-weight:700;">✗ ERROR</span> — ${escapeHtml(err.message || String(err))}`;
+  } finally {
+    deployState.busy = false;
+  }
+});
+
+deployRollbackBtn.addEventListener('click', async () => {
+  if (deployState.busy) return;
+  const plan = deployState.plan;
+  if (!plan || !plan.rollbackPrep.previousGroupId) return;
+  if (!confirm(`Rollback ${plan.channel} channel to group ${plan.rollbackPrep.previousGroupId.slice(0, 12)}…?\n\nMessage: "${plan.rollbackPrep.previousMessage || '(none)'}"\n\nThis re-publishes the previous update so users on the channel get it within a minute.`)) return;
+  deployState.busy = true;
+  deployRollbackBtn.disabled = true;
+  deployExecuteLog.textContent += '\n--- ROLLBACK ---\n';
+  attachDeployLog(deployExecuteLog);
+  try {
+    const res = await window.hive.rollbackDeploy({
+      project: 'fxv',
+      channel: plan.channel,
+      toGroupId: plan.rollbackPrep.previousGroupId,
+      reason: 'manual rollback from deploy modal after smoke/visual review',
+    });
+    detachDeployLog();
+    if (res.ok) {
+      deployExecuteStatus.innerHTML = `<span style="color:var(--success,#4ade80);font-weight:700;">✓ ROLLED BACK</span> in ${(res.durationMs / 1000).toFixed(1)}s — new group <code style="font-size:10px;background:var(--panel-2);padding:1px 5px;border-radius:3px;">${escapeHtml(res.groupId ? res.groupId.slice(0, 12) + '…' : '?')}</code>`;
+      deployRollbackBtn.style.display = 'none';
+    } else {
+      deployExecuteStatus.innerHTML = `<span style="color:var(--error);font-weight:700;">✗ ROLLBACK FAILED</span> — ${escapeHtml(res.error || 'unknown')}`;
+    }
+  } catch (err) {
+    detachDeployLog();
+    deployExecuteStatus.innerHTML = `<span style="color:var(--error);font-weight:700;">✗ ROLLBACK ERROR</span> — ${escapeHtml(err.message || String(err))}`;
+  } finally {
+    deployState.busy = false;
+    deployRollbackBtn.disabled = false;
+  }
+});
+
+deployDoneBtn.addEventListener('click', () => { deployModal.style.display = 'none'; });
+
+deployHistoryLink.addEventListener('click', async (e) => {
+  e.preventDefault();
+  setDeployStage('history');
+  deployHistoryList.innerHTML = '<div style="font-size:11px;color:var(--muted);">loading…</div>';
+  try {
+    const res = await window.hive.listDeploys(30);
+    if (!res || !res.ok) {
+      deployHistoryList.innerHTML = `<div style="color:var(--error);font-size:11px;">Failed: ${escapeHtml((res && res.error) || 'unknown')}</div>`;
+      return;
+    }
+    if (!res.deploys.length) {
+      deployHistoryList.innerHTML = '<div style="color:var(--muted);font-size:11px;text-align:center;padding:20px;">No deploy history yet.</div>';
+      return;
+    }
+    deployHistoryList.innerHTML = res.deploys.map(d => {
+      const ts = new Date(d.ts);
+      const tsStr = `${ts.getMonth() + 1}/${ts.getDate()} ${String(ts.getHours()).padStart(2, '0')}:${String(ts.getMinutes()).padStart(2, '0')}`;
+      const dur = d.durationMs ? `${(d.durationMs / 1000).toFixed(1)}s` : '?';
+      const groupShort = d.groupId ? d.groupId.slice(0, 12) : '—';
+      const errSnippet = d.error ? `<div style="color:var(--error);font-size:10px;margin-top:3px;">${escapeHtml(d.error.slice(0, 200))}</div>` : '';
+      return `
+        <div class="deploy-history-row ${d.status}">
+          <div class="row-head">
+            <span>${escapeHtml(d.kind.toUpperCase())} · ${escapeHtml(d.channel.toUpperCase())} · ${escapeHtml(d.status.toUpperCase())}</span>
+            <span>${tsStr}</span>
+          </div>
+          <div class="row-msg">${escapeHtml(d.message)}</div>
+          <div class="row-meta">group ${groupShort} · ${d.sha ? d.sha.slice(0, 8) : 'no-sha'} · ${dur}</div>
+          ${errSnippet}
+        </div>
+      `;
+    }).join('');
+  } catch (err) {
+    deployHistoryList.innerHTML = `<div style="color:var(--error);font-size:11px;">${escapeHtml(err.message || String(err))}</div>`;
+  }
+});
+
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && deployModal.style.display === 'flex') {
+    if (!deployState.busy) deployModal.style.display = 'none';
+  }
+});

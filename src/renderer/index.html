@@ -32,6 +32,7 @@
         <button data-theme="lab" class="active" type="button">LAB</button>
         <button data-theme="premium" type="button">PREMIUM</button>
       </span>
+      <a href="#" id="open-deploy" style="color:var(--accent);text-decoration:none;margin-right:10px;" title="Ship FXV — preview/production OTA with safety gates and rollback prep">⏏ deploy</a>
       <a href="#" id="open-ship-audit" style="color:var(--accent);text-decoration:none;margin-right:10px;" title="Run every specialist + page agent against a ship-blocker checklist. ~£0.05.">⚑ ship audit</a>
       <a href="#" id="refresh-seeds" style="color:var(--accent);text-decoration:none;margin-right:10px;" title="Re-embed all FXV repo files + curated CLAUDE memory into specialist namespaces. ~30s, $0.005.">↻ refresh memory</a>
       <a href="#" id="open-advisors" class="mode-build-only" style="color:var(--accent);text-decoration:none;margin-right:10px;" title="FXV advisors — chat with a domain specialist.">◈ advisors</a>
@@ -260,6 +261,99 @@
       </div>
       <div id="ship-audit-status" style="padding:6px 18px;font-size:11px;color:var(--muted);border-bottom:1px solid var(--border);min-height:14px;">Click RUN AUDIT to scan every agent's domain for ship-blockers.</div>
       <div id="ship-audit-grid" style="flex:1;overflow:auto;padding:14px;display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;align-content:start;"></div>
+    </div>
+  </div>
+
+  <div id="deploy-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:10;align-items:center;justify-content:center;">
+    <div style="background:var(--panel);border:1px solid var(--border-strong);border-radius:8px;width:980px;max-width:96vw;height:88vh;display:flex;flex-direction:column;overflow:hidden;">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-bottom:1px solid var(--border);">
+        <div style="display:flex;align-items:center;gap:14px;">
+          <strong style="color:var(--accent);letter-spacing:1px;">⏏ DEPLOY</strong>
+          <span id="deploy-stage" style="font-size:10px;color:var(--muted);letter-spacing:1px;">INTENT</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:14px;">
+          <a href="#" id="deploy-history-link" style="color:var(--muted);text-decoration:none;font-size:11px;">history</a>
+          <a href="#" id="close-deploy" style="color:var(--muted);text-decoration:none;">✕</a>
+        </div>
+      </div>
+
+      <div id="deploy-pane-intent" class="deploy-pane" style="flex:1;overflow:auto;padding:18px;display:flex;flex-direction:column;gap:14px;">
+        <div>
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1.2px;margin-bottom:6px;">what to ship</div>
+          <textarea id="deploy-intent-input" rows="3" placeholder='e.g. "ship the paywall redirect fix" — Cmd/Ctrl+Enter to prepare' style="width:100%;background:var(--panel-2);border:1px solid var(--border-strong);color:var(--text);padding:10px 12px;border-radius:4px;font-family:inherit;font-size:13px;resize:vertical;min-height:60px;"></textarea>
+          <div style="font-size:10px;color:var(--muted);margin-top:6px;">LLM extracts channel + message; you confirm before anything runs.</div>
+        </div>
+        <div>
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1.2px;margin-bottom:6px;">channel</div>
+          <div style="display:flex;gap:8px;">
+            <button class="deploy-channel-btn active" data-channel="preview" type="button" style="background:var(--panel-2);border:1px solid var(--border-strong);color:var(--text);padding:6px 16px;border-radius:4px;cursor:pointer;font-family:inherit;font-size:12px;">PREVIEW</button>
+            <button class="deploy-channel-btn" data-channel="production" type="button" style="background:var(--panel-2);border:1px solid var(--border-strong);color:var(--text);padding:6px 16px;border-radius:4px;cursor:pointer;font-family:inherit;font-size:12px;">PRODUCTION</button>
+            <span id="deploy-channel-hint" style="font-size:10px;color:var(--muted);align-self:center;margin-left:8px;">preview = TestFlight branch you can ship freely; production hits all real users</span>
+          </div>
+        </div>
+        <div>
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1.2px;margin-bottom:6px;">message (max 200 chars)</div>
+          <input id="deploy-message-input" type="text" maxlength="200" placeholder="paywall redirect fix" style="width:100%;background:var(--panel-2);border:1px solid var(--border-strong);color:var(--text);padding:8px 12px;border-radius:4px;font-family:inherit;font-size:12px;" />
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;">
+          <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);">
+            <input id="deploy-skip-typecheck" type="checkbox" /> skip typecheck (logged as warning)
+          </label>
+        </div>
+        <div style="display:flex;gap:10px;justify-content:flex-end;">
+          <button id="deploy-prepare-btn" type="button" style="background:var(--accent);border:none;color:#00171f;font-weight:700;padding:8px 18px;border-radius:4px;cursor:pointer;font-family:inherit;font-size:12px;letter-spacing:0.5px;">PREPARE</button>
+        </div>
+        <pre id="deploy-prepare-log" style="margin:0;background:var(--panel-2);border:1px solid var(--border);border-radius:4px;padding:8px 10px;font-size:10px;line-height:1.45;max-height:200px;overflow:auto;white-space:pre-wrap;display:none;"></pre>
+      </div>
+
+      <div id="deploy-pane-plan" class="deploy-pane" style="display:none;flex:1;overflow:auto;padding:18px;flex-direction:column;gap:14px;">
+        <div id="deploy-plan-header" style="display:flex;justify-content:space-between;align-items:center;"></div>
+        <div>
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1.2px;margin-bottom:6px;">preflight</div>
+          <div id="deploy-preflight-list" style="display:flex;flex-direction:column;gap:4px;"></div>
+        </div>
+        <div>
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1.2px;margin-bottom:6px;">what changed</div>
+          <div id="deploy-diff-summary" style="font-size:12px;line-height:1.5;color:var(--text);background:var(--panel-2);border:1px solid var(--border);border-radius:4px;padding:10px 12px;"></div>
+          <div id="deploy-diff-meta" style="font-size:10px;color:var(--muted);margin-top:6px;"></div>
+        </div>
+        <div>
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1.2px;margin-bottom:6px;">rollback target</div>
+          <div id="deploy-rollback-prep" style="font-size:11px;color:var(--text);"></div>
+        </div>
+        <div id="deploy-blockers-wrap" style="display:none;">
+          <div style="font-size:10px;color:var(--error);text-transform:uppercase;letter-spacing:1.2px;margin-bottom:6px;">blockers</div>
+          <ul id="deploy-blockers-list" style="margin:0;padding-left:18px;font-size:11px;color:var(--error);line-height:1.5;"></ul>
+        </div>
+        <div id="deploy-warnings-wrap" style="display:none;">
+          <div style="font-size:10px;color:var(--waiting);text-transform:uppercase;letter-spacing:1.2px;margin-bottom:6px;">warnings</div>
+          <ul id="deploy-warnings-list" style="margin:0;padding-left:18px;font-size:11px;color:var(--waiting);line-height:1.5;"></ul>
+        </div>
+        <div id="deploy-confirm-wrap" style="display:flex;flex-direction:column;gap:8px;border-top:1px solid var(--border);padding-top:14px;">
+          <div id="deploy-confirm-prompt" style="font-size:11px;color:var(--muted);"></div>
+          <input id="deploy-confirm-input" type="text" placeholder='type to confirm' style="background:var(--panel-2);border:1px solid var(--border-strong);color:var(--text);padding:6px 10px;border-radius:4px;font-family:inherit;font-size:12px;display:none;" />
+          <div style="display:flex;gap:10px;justify-content:flex-end;">
+            <button id="deploy-back-btn" type="button" style="background:var(--panel-2);border:1px solid var(--border-strong);color:var(--text);padding:7px 14px;border-radius:4px;cursor:pointer;font-family:inherit;font-size:11px;">← back</button>
+            <button id="deploy-ship-btn" type="button" style="background:var(--accent);border:none;color:#00171f;font-weight:700;padding:7px 18px;border-radius:4px;cursor:pointer;font-family:inherit;font-size:12px;letter-spacing:0.5px;">SHIP</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="deploy-pane-execute" class="deploy-pane" style="display:none;flex:1;overflow:hidden;flex-direction:column;">
+        <div id="deploy-execute-header" style="padding:14px 18px;border-bottom:1px solid var(--border);font-size:12px;color:var(--text);"></div>
+        <pre id="deploy-execute-log" style="margin:0;flex:1;background:var(--panel-2);border:none;padding:12px 18px;font-size:10px;line-height:1.5;overflow:auto;white-space:pre-wrap;color:var(--text);"></pre>
+        <div id="deploy-execute-footer" style="display:none;padding:12px 18px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;gap:10px;">
+          <div id="deploy-execute-status" style="font-size:11px;color:var(--text);"></div>
+          <div style="display:flex;gap:8px;">
+            <button id="deploy-rollback-btn" type="button" style="display:none;background:var(--error);border:none;color:#fff;font-weight:700;padding:6px 14px;border-radius:4px;cursor:pointer;font-family:inherit;font-size:11px;">ROLLBACK</button>
+            <button id="deploy-done-btn" type="button" style="background:var(--panel-2);border:1px solid var(--border-strong);color:var(--text);padding:6px 14px;border-radius:4px;cursor:pointer;font-family:inherit;font-size:11px;">DONE</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="deploy-pane-history" class="deploy-pane" style="display:none;flex:1;overflow:auto;padding:18px;">
+        <div id="deploy-history-list" style="display:flex;flex-direction:column;gap:8px;"></div>
+      </div>
     </div>
   </div>
 

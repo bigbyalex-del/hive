@@ -20,6 +20,81 @@ body.mode-fxv-advise .cell.advisor-lead {
   border-left: 3px solid var(--persona-color, var(--manager));
 }
 
+/* Deploy modal */
+.deploy-channel-btn.active {
+  background: var(--accent) !important;
+  color: #00171f !important;
+  border-color: var(--accent) !important;
+  font-weight: 700;
+}
+.deploy-channel-btn[data-channel="production"].active {
+  background: var(--error) !important;
+  color: #fff !important;
+  border-color: var(--error) !important;
+}
+.deploy-preflight-row {
+  display: flex;
+  gap: 10px;
+  font-size: 11px;
+  align-items: flex-start;
+  padding: 4px 8px;
+  background: var(--panel-2);
+  border-radius: 3px;
+  border-left: 2px solid var(--border);
+}
+.deploy-preflight-row.ok { border-left-color: var(--success, #4ade80); }
+.deploy-preflight-row.fail-blocking { border-left-color: var(--error); }
+.deploy-preflight-row.fail-warning { border-left-color: var(--waiting); }
+.deploy-preflight-row .pf-icon {
+  width: 14px;
+  flex-shrink: 0;
+  font-weight: 700;
+  font-family: monospace;
+}
+.deploy-preflight-row.ok .pf-icon { color: var(--success, #4ade80); }
+.deploy-preflight-row.fail-blocking .pf-icon { color: var(--error); }
+.deploy-preflight-row.fail-warning .pf-icon { color: var(--waiting); }
+.deploy-preflight-row .pf-name {
+  font-weight: 600;
+  color: var(--text);
+  margin-right: 8px;
+}
+.deploy-preflight-row .pf-detail {
+  color: var(--muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+  flex: 1;
+}
+.deploy-history-row {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
+  border-radius: 4px;
+  padding: 8px 12px;
+  font-size: 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.deploy-history-row.shipped { border-left-color: var(--success, #4ade80); }
+.deploy-history-row.failed { border-left-color: var(--error); }
+.deploy-history-row.executing { border-left-color: var(--waiting); }
+.deploy-history-row.cancelled { border-left-color: var(--muted); }
+.deploy-history-row .row-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.deploy-history-row .row-msg { color: var(--text); }
+.deploy-history-row .row-meta {
+  color: var(--muted);
+  font-size: 10px;
+  font-family: monospace;
+}
+
 :root {
   --bg: #0b0f14;
   --panel: #111821;
