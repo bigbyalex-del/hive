@@ -17,10 +17,13 @@
       <span style="color:var(--muted);font-weight:400;">— talk to your specialist agents</span>
     </div>
     <div class="meta">
+      <span class="live-chip" id="live-chip" style="display:none;" title="Click to drill in">
+        <span class="dot"></span><span id="live-chip-text">—</span>
+      </span>
       <span class="mode-build-only">task: <b id="meta-task">—</b> &nbsp;·&nbsp;</span>
-      runtime <b id="meta-runtime">00:00</b> &nbsp;·&nbsp;
+      <span class="mode-build-only">runtime <b id="meta-runtime">00:00</b> &nbsp;·&nbsp;
       tokens <b id="meta-tokens">0</b>
-      &nbsp;·&nbsp;
+      &nbsp;·&nbsp;</span>
       <span title="Spend on this run / today — click for breakdown" id="meta-cost-wrap" style="cursor:pointer;">£<b id="meta-cost">0.00</b></span>
       &nbsp;·&nbsp;
       <select id="project-type" class="mode-build-only" style="background:var(--panel);border:1px solid var(--border-strong);color:var(--text);font-family:inherit;padding:3px 6px;border-radius:3px;font-size:11px;margin-right:10px;">
@@ -104,12 +107,25 @@
     </div>
   </div>
 
+  <div id="pulse-strip" class="pulse-strip" style="display:none;">
+    <div class="pulse-head">
+      <span class="pulse-greet" id="pulse-greet">Loading…</span>
+      <span class="pulse-since" id="pulse-since"></span>
+    </div>
+    <div class="pulse-tiles" id="pulse-tiles"></div>
+    <div class="pulse-quiet" id="pulse-quiet" style="display:none;">
+      <div class="pulse-quiet-icon">✓</div>
+      <div class="pulse-quiet-text" id="pulse-quiet-text">All quiet.</div>
+      <a href="#" id="pulse-expand" class="pulse-expand-link">show details</a>
+    </div>
+  </div>
+
   <div class="taskbar">
     <input id="task-input" type="text" placeholder='Ask the Programme Lead, or hit Council to fan out to every specialist' />
-    <button id="snap-btn" class="mode-build-only" title="Drag a region to attach.">📸 Snap</button>
-    <button id="watch-btn" class="mode-build-only" title="Watch the screen.">👁 Watch</button>
-    <button id="spec-btn" class="mode-build-only" title="Spec Interview.">📋 Spec</button>
-    <button id="mic-btn" class="mode-build-only" title="Hold SPACE to talk">🎤 Talk</button>
+    <button id="snap-btn" title="Drag a region to attach (Ctrl+Shift+H global). Screenshot rides along with your next ask — handy for showing UI/UX a real screen.">▣ Snap</button>
+    <button id="watch-btn" title="Watch screen — latest frame auto-attaches to every ask (Ctrl+Shift+W).">⊙ Watch</button>
+    <button id="spec-btn" class="mode-build-only" title="Spec Interview — build-mode only.">▤ Spec</button>
+    <button id="mic-btn" title="Hold SPACE or click + hold to talk. Whisper transcribes into the ask input.">◉ Talk</button>
     <button id="council-run" title="Fan to every specialist + page agent in parallel; Programme Lead synthesises consensus + dissent. ~£0.05.">Council</button>
     <button id="task-run">Ask</button>
   </div>
@@ -228,10 +244,16 @@
 
   <div class="footer">
     <div class="keys">
-      <span><kbd>Enter</kbd> run task</span>
-      <span><kbd>1</kbd>–<kbd>8</kbd> focus worker</span>
-      <span><kbd>M</kbd> focus manager</span>
-      <span><kbd>Esc</kbd> unfocus</span>
+      <span class="key-build-only"><kbd>Enter</kbd> run task</span>
+      <span class="key-build-only"><kbd>1</kbd>–<kbd>8</kbd> focus worker</span>
+      <span class="key-build-only"><kbd>M</kbd> focus manager</span>
+      <span class="key-build-only"><kbd>Esc</kbd> unfocus</span>
+      <span class="key-advise" style="display:none;"><kbd>/</kbd> quick ask</span>
+      <span class="key-advise" style="display:none;"><kbd>C</kbd> council</span>
+      <span class="key-advise" style="display:none;"><kbd>S</kbd> ship audit</span>
+      <span class="key-advise" style="display:none;"><kbd>D</kbd> deploy</span>
+      <span class="key-advise" style="display:none;"><kbd>Tab</kbd> cycle persona</span>
+      <span class="key-advise" style="display:none;"><kbd>Esc</kbd> close panel</span>
     </div>
     <div class="badge" id="live-badge">● ready</div>
   </div>

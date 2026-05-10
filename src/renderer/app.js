@@ -2745,3 +2745,501 @@ window.addEventListener('keydown', (e) => {
     if (!deployState.busy) deployModal.style.display = 'none';
   }
 });
+
+// ============================================================
+// PULSE STRIP — landing surface populated from main process
+// ============================================================
+
+const pulseStripEl = document.getElementById('pulse-strip');
+const pulseTilesEl = document.getElementById('pulse-tiles');
+const pulseGreetEl = document.getElementById('pulse-greet');
+const pulseSinceEl = document.getElementById('pulse-since');
+const pulseQuietEl = document.getElementById('pulse-quiet');
+const pulseQuietTextEl = document.getElementById('pulse-quiet-text');
+const pulseExpandLink = document.getElementById('pulse-expand');
+const liveChipEl = document.getElementById('live-chip');
+const liveChipTextEl = document.getElementById('live-chip-text');
+
+let pulseExpanded = false;
+let liveChipRotation = 0;
+let liveChipTimer = null;
+
+function fmtAgo(ms) {
+  if (ms == null) return '?';
+  const s = Math.round(ms / 1000);
+  if (s < 60) return s + 's';
+  const m = Math.round(s / 60);
+  if (m < 60) return m + 'm';
+  const h = Math.round(m / 60);
+  if (h < 48) return h + 'h';
+  const d = Math.round(h / 24);
+  return d + 'd';
+}
+
+function renderPulseTile(label, headline, subline, meta, severity, delta, deltaClass, onClick) {
+  const div = document.createElement('div');
+  div.className = 'pulse-tile sev-' + (severity || 'muted');
+  if (onClick) div.addEventListener('click', onClick);
+  div.innerHTML = `
+    <div class="pulse-tile-label">
+      <span>${escapeHtml(label)}</span>
+      ${delta ? `<span class="delta ${deltaClass || ''}">${escapeHtml(delta)}</span>` : ''}
+    </div>
+    <div class="pulse-tile-headline">${headline}</div>
+    ${subline ? `<div class="pulse-tile-subline">${subline}</div>` : ''}
+    ${meta ? `<div class="pulse-tile-meta">${escapeHtml(meta)}</div>` : ''}
+  `;
+  return div;
+}
+
+function buildPulseTiles(p) {
+  const tiles = [];
+
+  // 1. App Store
+  if (p.appStore.available) {
+    const sev = p.appStore.severity;
+    tiles.push(renderPulseTile(
+      'App Store',
+      `${escapeHtml(p.appStore.detail)}`,
+      p.appStore.buildNumber ? `Build ${escapeHtml(p.appStore.buildNumber)}` : null,
+      p.appStore.stateChangedAt ? `changed ${fmtAgo(Date.now() - p.appStore.stateChangedAt)} ago` : null,
+      sev,
+      sev === 'good' ? '✓ ready' : (sev === 'critical' ? '✗ rejected' : '⏳ in review'),
+      sev === 'good' ? 'good' : (sev === 'critical' ? 'crit' : 'warn'),
+      () => alert('ASC dashboard link wires up once ASC poller lands')
+    ));
+  } else {
+    tiles.push(renderPulseTile(
+      'App Store',
+      '<span style="color:var(--muted);font-weight:600;">ASC poller not wired</span>',
+      'manual check still needed for build status',
+      null,
+      'muted',
+      null, null, null
+    ));
+  }
+
+  // 2. Alerts
+  const a = p.alerts;
+  let alertHeadline, alertSub, alertSev;
+  if (a.total === 0) {
+    alertHeadline = `0 open <span class="pulse-pill good">CLEAR</span>`;
+    alertSub = 'no Sentry / Supabase / GH bug reports';
+    alertSev = 'good';
+  } else {
+    const sevTag = a.severityBreakdown.red > 0
+      ? `<span class="pulse-pill crit">${a.severityBreakdown.red} RED</span>`
+      : (a.severityBreakdown.amber > 0 ? `<span class="pulse-pill warn">${a.severityBreakdown.amber} AMBER</span>` : '');
+    alertHeadline = `${a.total} open ${sevTag}`;
+    const lines = [];
+    if (a.bySource.sentry > 0) lines.push(`<span class="pulse-source-badge sy">SY</span> ${a.bySource.sentry}`);
+    if (a.bySource.github > 0) lines.push(`<span class="pulse-source-badge gh">GH</span> ${a.bySource.github}`);
+    if (a.bySource.supabase > 0) lines.push(`<span class="pulse-source-badge sb">SB</span> ${a.bySource.supabase}`);
+    if (a.bySource.asc > 0) lines.push(`<span class="pulse-source-badge ac">AC</span> ${a.bySource.asc}`);
+    alertSub = `<div class="pulse-source-row">${lines.join(' &nbsp; ')}</div>`;
+    alertSev = a.severity;
+  }
+  tiles.push(renderPulseTile(
+    'Alerts',
+    alertHeadline,
+    alertSub,
+    'tap → ALERTS tab',
+    alertSev,
+    a.newSinceLastOpen > 0 ? `+${a.newSinceLastOpen} since last open` : null,
+    a.newSinceLastOpen > 0 ? 'crit' : null,
+    () => {
+      // Switch sidebar to ALERTS tab
+      const alertTab = Array.from(document.querySelectorAll('.bs-tab')).find(b => b.dataset.tab === 'alerts');
+      if (alertTab) alertTab.click();
+    }
+  ));
+
+  // 3. Last ship
+  const s = p.ship;
+  if (s.hasAny) {
+    const status = s.lastStatus === 'shipped' ? `<span class="pulse-pill good">✓ ${escapeHtml(s.lastChannel.toUpperCase())}</span>`
+                 : s.lastStatus === 'failed'  ? `<span class="pulse-pill crit">✗ FAILED</span>`
+                 : `<span class="pulse-pill warn">${escapeHtml((s.lastStatus || '?').toUpperCase())}</span>`;
+    tiles.push(renderPulseTile(
+      'Last ship',
+      `${escapeHtml((s.lastMessage || '').slice(0, 40))} ${status}`,
+      `<div style="color:var(--muted);">group ${s.groupId ? escapeHtml(s.groupId.slice(0, 12)) : '—'} · ${s.rollbackAvailable ? 'rollback ready' : 'no rollback'}</div>`,
+      'tap → deploy history',
+      s.severity,
+      s.lastTs ? fmtAgo(Date.now() - s.lastTs) + ' ago' : null,
+      s.lastStatus === 'shipped' ? 'good' : (s.lastStatus === 'failed' ? 'crit' : null),
+      () => {
+        document.getElementById('open-deploy').click();
+        setTimeout(() => document.getElementById('deploy-history-link').click(), 100);
+      }
+    ));
+  } else {
+    tiles.push(renderPulseTile(
+      'Last ship',
+      '<span style="color:var(--muted);font-weight:600;">No deploys yet</span>',
+      'first ship via ⏏ deploy',
+      null,
+      'muted',
+      null, null,
+      () => document.getElementById('open-deploy').click()
+    ));
+  }
+
+  // 4. Resume thread
+  const r = p.resume;
+  if (r.hasAny) {
+    const personaName = (advisorList.find(x => x.id === r.personaId) || {}).name || r.personaId;
+    const color = PERSONA_COLOR[r.personaId] || 'var(--accent)';
+    tiles.push(renderPulseTile(
+      'Resume thread',
+      `<span style="color:${color};">${escapeHtml(personaName)}</span> — ${escapeHtml((r.lastQuestion || '').slice(0, 50))}`,
+      `<div style="color:var(--muted);font-style:italic;">"${escapeHtml((r.lastReplySnippet || '').slice(0, 100))}"</div>`,
+      `${r.turnCount} turn${r.turnCount === 1 ? '' : 's'} · ${r.ts ? fmtAgo(Date.now() - r.ts) + ' ago' : ''}`,
+      'info',
+      null, null,
+      () => {
+        if (document.getElementById('advisors-modal') && r.personaId) {
+          document.getElementById('advisors-modal').style.display = 'flex';
+          if (typeof selectAdvisor === 'function') selectAdvisor(r.personaId);
+        }
+      }
+    ));
+  } else {
+    tiles.push(renderPulseTile(
+      'Resume thread',
+      '<span style="color:var(--muted);font-weight:600;">No conversations yet</span>',
+      'tap any cell to start',
+      null,
+      'muted',
+      null, null, null
+    ));
+  }
+
+  // 5. Next action — pulled from localStorage (renderer-side)
+  const actions = (typeof loadActions === 'function') ? loadActions() : [];
+  const open = actions.filter(x => x.status !== 'done');
+  const ranked = open.sort((a, b) => {
+    const rank = { high: 0, critical: 0, medium: 1, low: 2 };
+    const ra = rank[a.urgency] ?? 1;
+    const rb = rank[b.urgency] ?? 1;
+    if (ra !== rb) return ra - rb;
+    return (b.ts || 0) - (a.ts || 0);
+  });
+  if (ranked.length === 0) {
+    tiles.push(renderPulseTile(
+      'Next action',
+      '<span style="color:var(--muted);font-weight:600;">Nothing waiting</span>',
+      'actions auto-extracted from advisor replies',
+      null, 'muted', null, null,
+      () => {
+        const t = Array.from(document.querySelectorAll('.bs-tab')).find(b => b.dataset.tab === 'actions');
+        if (t) t.click();
+      }
+    ));
+  } else {
+    const top = ranked[0];
+    const sourceColor = top.source ? (PERSONA_COLOR[top.source] || 'var(--muted)') : 'var(--muted)';
+    tiles.push(renderPulseTile(
+      'Next action',
+      escapeHtml(top.summary),
+      `<span style="color:${sourceColor};">${escapeHtml(top.sourceName || top.source || 'YOU')}</span>${ranked.length > 1 ? ` · +${ranked.length - 1} more` : ''}`,
+      'tap → ACTIONS',
+      'action',
+      (top.urgency || 'medium').toUpperCase(),
+      top.urgency === 'high' ? 'crit' : (top.urgency === 'low' ? null : 'warn'),
+      () => {
+        const t = Array.from(document.querySelectorAll('.bs-tab')).find(b => b.dataset.tab === 'actions');
+        if (t) t.click();
+      }
+    ));
+  }
+
+  return tiles;
+}
+
+async function refreshPulse() {
+  if (!document.body.classList.contains('mode-fxv-advise')) return;
+  let res;
+  try { res = await window.hive.getPulse(); } catch { return; }
+  if (!res || !res.ok) return;
+  const p = res.pulse;
+
+  pulseStripEl.style.display = 'block';
+  const greetParts = [];
+  if (p.isAnythingNew || pulseExpanded) {
+    pulseQuietEl.style.display = 'none';
+    pulseTilesEl.style.display = 'grid';
+    pulseGreetEl.innerHTML = `<b>${escapeHtml(p.changedSummary)}</b>`;
+    pulseSinceEl.textContent = p.lastOpenTs ? `last open: ${fmtAgo(p.msSinceLastOpen)} ago` : 'first open';
+    // Render tiles
+    pulseTilesEl.innerHTML = '';
+    const tiles = buildPulseTiles(p);
+    for (const t of tiles) pulseTilesEl.appendChild(t);
+  } else {
+    // Quiet collapse
+    pulseTilesEl.style.display = 'none';
+    pulseQuietEl.style.display = 'flex';
+    pulseGreetEl.innerHTML = '';
+    pulseSinceEl.textContent = p.lastOpenTs ? `last open: ${fmtAgo(p.msSinceLastOpen)} ago` : 'first open';
+    pulseQuietTextEl.innerHTML = `<strong style="color:var(--text);font-weight:600;">All quiet.</strong> ${escapeHtml(p.changedSummary)}`;
+  }
+
+  // Update live chip
+  updateLiveChip(p);
+}
+
+function updateLiveChip(p) {
+  if (!liveChipEl) return;
+  liveChipEl.style.display = 'inline-flex';
+  const candidates = [];
+  if (p.appStore.available) candidates.push({ sev: p.appStore.severity, text: p.appStore.detail });
+  if (p.alerts.total > 0) {
+    const sev = p.alerts.severity;
+    candidates.push({ sev, text: `${p.alerts.total} alert${p.alerts.total === 1 ? '' : 's'}${p.alerts.severityBreakdown.red > 0 ? ` · ${p.alerts.severityBreakdown.red} RED` : ''}` });
+  }
+  if (p.ship.hasAny && p.ship.lastTs) {
+    candidates.push({ sev: p.ship.severity, text: `Last ship: ${p.ship.lastChannel} ${fmtAgo(Date.now() - p.ship.lastTs)} ago` });
+  }
+  if (candidates.length === 0) {
+    candidates.push({ sev: 'good', text: 'ready · all systems quiet' });
+  }
+  liveChipRotation = (liveChipRotation + 1) % candidates.length;
+  const pick = candidates[liveChipRotation % candidates.length];
+  liveChipEl.classList.remove('sev-good', 'sev-warning', 'sev-critical', 'sev-muted', 'sev-info', 'sev-action');
+  liveChipEl.classList.add('sev-' + (pick.sev || 'muted'));
+  liveChipTextEl.innerHTML = pick.text;
+}
+
+if (pulseExpandLink) pulseExpandLink.addEventListener('click', (e) => {
+  e.preventDefault();
+  pulseExpanded = !pulseExpanded;
+  pulseExpandLink.textContent = pulseExpanded ? 'collapse' : 'show details';
+  refreshPulse();
+});
+
+// Refresh pulse on a 60s loop while in advisor mode + on first paint
+if (document.body.classList.contains('mode-fxv-advise')) {
+  refreshPulse();
+  setInterval(refreshPulse, 60_000);
+  // Live chip rotates every 8s
+  if (liveChipTimer) clearInterval(liveChipTimer);
+  liveChipTimer = setInterval(async () => {
+    try {
+      const res = await window.hive.getPulse();
+      if (res && res.ok) updateLiveChip(res.pulse);
+    } catch { /* fine */ }
+  }, 8000);
+  // Mark seen 2s after first render so the user actually sees the deltas
+  // before they get reset.
+  setTimeout(() => { window.hive.markPulseSeen().catch(() => {}); }, 2000);
+}
+
+// ============================================================
+// CELL PREVIEWS — render last-reply snippet + freshness on each cell
+// ============================================================
+
+async function refreshCellPreviews() {
+  if (!document.body.classList.contains('mode-fxv-advise')) return;
+  if (advisorList.length === 0) return;
+  const personaIds = Object.values(CELL_TO_PERSONA);
+  let res;
+  try { res = await window.hive.getCellPreviews(personaIds); } catch { return; }
+  if (!res || !res.ok) return;
+  const previews = res.previews || {};
+  for (const [cellId, personaId] of Object.entries(CELL_TO_PERSONA)) {
+    const cell = cells.get(cellId);
+    if (!cell) continue;
+    const pv = previews[personaId];
+    const personaColor = PERSONA_COLOR[personaId] || 'var(--accent)';
+
+    // Replace the .log content with a thread block + freshness
+    if (cell.logEl) {
+      if (pv && pv.lastAssistant) {
+        const ago = fmtAgo(Date.now() - pv.lastAssistant.ts);
+        const snippet = pv.lastAssistant.content.length > 180 ? pv.lastAssistant.content.slice(0, 180) + '…' : pv.lastAssistant.content;
+        cell.logEl.innerHTML = `
+          <div class="cell-thread">
+            <div class="you">YOU asked ${ago} ago</div>
+            <div class="reply">${escapeHtml(snippet)}</div>
+          </div>
+        `;
+        cell.logEl.style.opacity = '1';
+      } else {
+        cell.logEl.innerHTML = `<div class="cell-thread empty">— no conversation yet — tap to chat</div>`;
+        cell.logEl.style.opacity = '1';
+      }
+    }
+    // Update footstats with turn count + freshness
+    const footer = cell.el.querySelector('.footstats');
+    if (footer && pv) {
+      footer.innerHTML = `
+        <span><span class="advisor-turns">${pv.turnCount}</span> turn${pv.turnCount === 1 ? '' : 's'}</span>
+        <span class="freshness fresh"><span class="dot"></span>tap to chat →</span>
+      `;
+    }
+  }
+}
+
+// Refresh on advisor list load + after each advisor reply
+const _origLoadAdvisors = typeof loadAdvisors === 'function' ? loadAdvisors : null;
+if (_origLoadAdvisors) {
+  loadAdvisors = async function() {
+    await _origLoadAdvisors();
+    setTimeout(refreshCellPreviews, 50);
+  };
+}
+const _origSendAdvisor = typeof sendAdvisorMessage === 'function' ? sendAdvisorMessage : null;
+if (_origSendAdvisor) {
+  sendAdvisorMessage = async function() {
+    await _origSendAdvisor();
+    setTimeout(refreshCellPreviews, 250);
+    refreshPulse();
+  };
+}
+// Initial paint after load
+setTimeout(refreshCellPreviews, 600);
+setInterval(refreshCellPreviews, 30_000);
+
+// ============================================================
+// ACTIONS TRIAGE — replace flat list with grouped HIGH/MED/LOW
+// Top 10 default + show-all expander
+// ============================================================
+
+let actionsExpanded = false;
+
+const _origRenderActions = typeof renderActions === 'function' ? renderActions : null;
+if (_origRenderActions) {
+  renderActions = function() {
+    const actions = loadActions();
+    const open = actions.filter(a => a.status !== 'done');
+    bsCountActions.textContent = open.length;
+    if (actions.length === 0) {
+      actionsListEl.innerHTML = '<div class="brainstorm-empty">No actions yet. They\'ll auto-appear when an agent reply suggests one.</div>';
+      return;
+    }
+    const groups = { high: [], medium: [], low: [], done: [] };
+    for (const a of actions) {
+      if (a.status === 'done') groups.done.push(a);
+      else if (a.urgency === 'high' || a.urgency === 'critical') groups.high.push(a);
+      else if (a.urgency === 'low') groups.low.push(a);
+      else groups.medium.push(a);
+    }
+    const renderRow = (a) => {
+      const color = a.source ? (PERSONA_COLOR[a.source] || 'var(--accent)') : 'var(--muted)';
+      const sourceName = a.sourceName || 'YOU';
+      const urg = a.urgency || 'medium';
+      return `
+        <div class="action-item ${a.status === 'done' ? 'done' : ''}" data-id="${a.id}" style="--note-color:${color};">
+          <input type="checkbox" class="action-checkbox" data-id="${a.id}" ${a.status === 'done' ? 'checked' : ''} title="Mark done" />
+          <div class="action-body">
+            <div class="action-summary">${escapeHtml(a.summary)}</div>
+            <div class="action-meta">
+              <span class="action-source">${escapeHtml(sourceName)}</span>
+              <span class="action-urgency-${urg}">${escapeHtml(urg.toUpperCase())}</span>
+            </div>
+          </div>
+          <a class="action-delete" data-id="${a.id}" title="Delete">✕</a>
+        </div>
+      `;
+    };
+    const rendered = [];
+    const cap = actionsExpanded ? 999 : 10;
+    let shown = 0;
+    let totalOpen = groups.high.length + groups.medium.length + groups.low.length;
+    if (groups.high.length) {
+      rendered.push(`<div class="triage-group"><div class="triage-label"><span class="urg-high">▲ HIGH (${groups.high.length})</span></div>${groups.high.slice(0, cap - shown).map(renderRow).join('')}</div>`);
+      shown += Math.min(groups.high.length, cap - shown);
+    }
+    if (groups.medium.length && shown < cap) {
+      rendered.push(`<div class="triage-group"><div class="triage-label"><span class="urg-med">▲ MEDIUM (${groups.medium.length})</span></div>${groups.medium.slice(0, cap - shown).map(renderRow).join('')}</div>`);
+      shown += Math.min(groups.medium.length, cap - shown);
+    }
+    if (groups.low.length && shown < cap) {
+      rendered.push(`<div class="triage-group"><div class="triage-label"><span class="urg-low">▲ LOW (${groups.low.length})</span></div>${groups.low.slice(0, cap - shown).map(renderRow).join('')}</div>`);
+      shown += Math.min(groups.low.length, cap - shown);
+    }
+    if (groups.done.length && actionsExpanded) {
+      rendered.push(`<div class="triage-group"><div class="triage-label"><span class="urg-low">✓ DONE (${groups.done.length})</span></div>${groups.done.map(renderRow).join('')}</div>`);
+    }
+    if (totalOpen > shown) {
+      rendered.push(`<div class="triage-more">+ ${totalOpen - shown} more · <a href="#" id="actions-show-all">show all</a> · <a href="#" id="actions-clear-all-done">clear done (${groups.done.length})</a></div>`);
+    } else if (groups.done.length && !actionsExpanded) {
+      rendered.push(`<div class="triage-more"><a href="#" id="actions-show-all">show ${groups.done.length} done</a> · <a href="#" id="actions-clear-all-done">clear done</a></div>`);
+    }
+    actionsListEl.innerHTML = rendered.join('');
+    // Wire show-all
+    const showAll = document.getElementById('actions-show-all');
+    if (showAll) showAll.addEventListener('click', (e) => {
+      e.preventDefault();
+      actionsExpanded = !actionsExpanded;
+      renderActions();
+    });
+    const clearAll = document.getElementById('actions-clear-all-done');
+    if (clearAll) clearAll.addEventListener('click', (e) => {
+      e.preventDefault();
+      const next = loadActions().filter(x => x.status !== 'done');
+      saveActions(next);
+      renderActions();
+    });
+    // Re-wire row checkboxes + deletes
+    actionsListEl.querySelectorAll('.action-checkbox').forEach(cb => {
+      cb.addEventListener('change', () => {
+        const id = cb.dataset.id;
+        const next = loadActions().map(x => String(x.id) === id ? { ...x, status: cb.checked ? 'done' : 'todo' } : x);
+        saveActions(next);
+        renderActions();
+      });
+    });
+    actionsListEl.querySelectorAll('.action-delete').forEach(a => {
+      a.addEventListener('click', (e) => {
+        e.preventDefault();
+        const id = a.dataset.id;
+        saveActions(loadActions().filter(x => String(x.id) !== id));
+        renderActions();
+      });
+    });
+  };
+  renderActions();
+}
+
+// ============================================================
+// PROGRAMME LEAD — synthesis panel (manual generate; daily auto deferred)
+// ============================================================
+
+function attachLeadSynthesis() {
+  const leadCellId = Object.keys(CELL_TO_PERSONA).find(k => CELL_TO_PERSONA[k] === 'fxv:manager');
+  if (!leadCellId) return;
+  const cell = cells.get(leadCellId);
+  if (!cell || !cell.taskEl) return;
+  // Render synthesis below the scope text. Use the most recent assistant
+  // reply as the synthesis content (manager's last answer).
+  window.hive.listPersonaChats('fxv:manager', 50).then(res => {
+    if (!res || !res.ok) return;
+    const lastAsst = (res.chats || []).filter(c => c.role === 'assistant').slice(-1)[0];
+    let existing = cell.el.querySelector('.lead-synthesis');
+    if (lastAsst) {
+      const ago = fmtAgo(Date.now() - lastAsst.ts);
+      const snippet = lastAsst.content.length > 280 ? lastAsst.content.slice(0, 280) + '…' : lastAsst.content;
+      const html = `
+        <div class="sl-label">⟦ Latest synthesis ⟧</div>
+        <div>${escapeHtml(snippet)}</div>
+        <div class="sl-attr">${ago} ago · tap the cell to ask the Lead a fresh question</div>
+      `;
+      if (existing) existing.innerHTML = html;
+      else {
+        const div = document.createElement('div');
+        div.className = 'lead-synthesis';
+        div.innerHTML = html;
+        cell.taskEl.parentNode.insertBefore(div, cell.taskEl.nextSibling);
+      }
+    }
+  }).catch(() => {});
+}
+setTimeout(attachLeadSynthesis, 800);
+// Refresh after any chat reply
+const _origExtractActionsFor = window.__extractActionsFor;
+window.__extractActionsFor = async (personaId, question, reply) => {
+  if (_origExtractActionsFor) await _origExtractActionsFor(personaId, question, reply);
+  if (personaId === 'fxv:manager') setTimeout(attachLeadSynthesis, 200);
+  refreshPulse();
+};
