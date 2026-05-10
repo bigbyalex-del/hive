@@ -257,16 +257,29 @@ export async function pollSentry(): Promise<PollResult> {
 // Hits the Supabase Management API analytics-logs endpoint with a SQL query
 // for 5xx responses in edge functions over the last hour. Each row becomes
 // an alert. Dedupe by Logflare's unique id field.
+//
+// Three things this had to learn the hard way:
+//   1. Table is `function_edge_logs`, not `edge_logs` (the latter exists but
+//      is empty in the analytics dataset).
+//   2. The endpoint REQUIRES `iso_timestamp_start` + `iso_timestamp_end` query
+//      params. Without them, every result is empty regardless of the WHERE
+//      clause — the WHERE never even runs.
+//   3. `metadata.method` does not exist; method lives on `metadata.request`.
 
 const SUPABASE_5XX_SQL = `
-  SELECT t.id, t.timestamp, t.event_message, response.status_code AS status, request.method AS method, request.url AS url
-  FROM edge_logs AS t
-  CROSS JOIN UNNEST(t.metadata) AS m
-  CROSS JOIN UNNEST(m.response) AS response
-  CROSS JOIN UNNEST(m.request) AS request
-  WHERE t.timestamp > timestamp_sub(current_timestamp(), interval 1 hour)
-    AND response.status_code >= 500
-  ORDER BY t.timestamp DESC
+  SELECT id, timestamp, event_message,
+         metadata.deployment_id AS deployment_id,
+         metadata.function_id AS function_id,
+         metadata.execution_time_ms AS execution_time_ms,
+         response.status_code AS status,
+         request.method AS method,
+         request.url AS url
+  FROM function_edge_logs
+  CROSS JOIN UNNEST(metadata) AS metadata
+  CROSS JOIN UNNEST(metadata.response) AS response
+  CROSS JOIN UNNEST(metadata.request) AS request
+  WHERE response.status_code >= 500
+  ORDER BY timestamp DESC
   LIMIT 50
 `.replace(/\s+/g, ' ').trim();
 
@@ -286,7 +299,16 @@ export async function pollSupabase(): Promise<PollResult> {
     return { source: 'supabase', inserted: 0, skipped: 0, error: 'SUPABASE_ACCESS_TOKEN/SUPABASE_PROJECT_REF not set' };
   }
 
-  const url = `https://api.supabase.com/v1/projects/${encodeURIComponent(ref)}/analytics/endpoints/logs.all?sql=${encodeURIComponent(SUPABASE_5XX_SQL)}`;
+  // Window covers the previous hour. The endpoint needs explicit ISO
+  // timestamps; SQL-side time filters alone return empty.
+  const end = new Date();
+  const start = new Date(end.getTime() - 60 * 60 * 1000);
+  const params = new URLSearchParams({
+    sql: SUPABASE_5XX_SQL,
+    iso_timestamp_start: start.toISOString(),
+    iso_timestamp_end: end.toISOString(),
+  });
+  const url = `https://api.supabase.com/v1/projects/${encodeURIComponent(ref)}/analytics/endpoints/logs.all?${params.toString()}`;
   let resp;
   try {
     resp = await fetch(url, {
