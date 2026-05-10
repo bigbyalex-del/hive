@@ -16,7 +16,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 import { embed } from './memory';
-import { loadChunks, recordRun } from './db';
+import { loadChunks, recordRun, insertChat } from './db';
 import { AnthropicProvider } from './providers/anthropic';
 
 interface Persona {
@@ -294,6 +294,22 @@ export async function consultAdvisor(
     projectId: null,
   });
 
+  const finalSources = sources.map(s => {
+    const path = s.tag?.startsWith('src:') ? s.tag.slice(4).split('#')[0] : (s.tag ?? '(unknown)');
+    const owner = persona.isManager ? specialistLabel(s.agentId) : null;
+    return {
+      index: s.index,
+      label: owner ? `${owner} · ${path}` : path,
+      score: s.score,
+    };
+  });
+
+  // Persist the turn so cells + pulse + restart-resume see it.
+  // User row first, then assistant — preserves chronological order in
+  // listChatsForPersona (ORDER BY ts ASC).
+  insertChat({ personaId: persona.id, role: 'user', content: q });
+  insertChat({ personaId: persona.id, role: 'assistant', content: reply, sources: finalSources });
+
   // Note: action extraction is handled via a separate IPC call from the
   // renderer so the chat reply lands instantly and actions arrive a second
   // later — no extra blocking for the user.
@@ -302,15 +318,7 @@ export async function consultAdvisor(
     reply,
     personaId: persona.id,
     personaName: persona.name,
-    sources: sources.map(s => {
-      const path = s.tag?.startsWith('src:') ? s.tag.slice(4).split('#')[0] : (s.tag ?? '(unknown)');
-      const owner = persona.isManager ? specialistLabel(s.agentId) : null;
-      return {
-        index: s.index,
-        label: owner ? `${owner} · ${path}` : path,
-        score: s.score,
-      };
-    }),
+    sources: finalSources,
     citationMissingCount,
     inputTokens,
     outputTokens,

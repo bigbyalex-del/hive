@@ -131,6 +131,18 @@ export async function initDb(): Promise<void> {
     );
     CREATE INDEX IF NOT EXISTS idx_deploys_ts ON deploys(ts);
     CREATE INDEX IF NOT EXISTS idx_deploys_channel ON deploys(channel, ts);
+
+    CREATE TABLE IF NOT EXISTS chats (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ts INTEGER NOT NULL,
+      persona_id TEXT NOT NULL,
+      role TEXT NOT NULL,
+      content TEXT NOT NULL,
+      sources_json TEXT,
+      project_id INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_chats_persona_ts ON chats(persona_id, ts);
+    CREATE INDEX IF NOT EXISTS idx_chats_ts ON chats(ts);
   `);
 
   // Lightweight migrations — sql.js doesn't fail on duplicate ALTER, but we
@@ -590,6 +602,183 @@ export function listDeploys(limit = 20): DeployRow[] {
   }
   stmt.free();
   return out;
+}
+
+// ---- Chats ------------------------------------------------------------
+//
+// Persisted advisor conversations. Each turn is one row. Powers cell
+// previews, "resume thread" pulse tile, and lets advisor histories
+// survive restart instead of evaporating from a renderer Map.
+
+export interface ChatRow {
+  id: number;
+  ts: number;
+  personaId: string;
+  role: 'user' | 'assistant';
+  content: string;
+  sources: { index: number; label: string; score: number }[] | null;
+  projectId: number | null;
+}
+
+export function insertChat(opts: { personaId: string; role: 'user' | 'assistant'; content: string; sources?: { index: number; label: string; score: number }[] | null; projectId?: number | null }): number | null {
+  if (!db) return null;
+  const stmt = db.prepare('INSERT INTO chats (ts, persona_id, role, content, sources_json, project_id) VALUES (?, ?, ?, ?, ?, ?)');
+  stmt.run([
+    Date.now(),
+    opts.personaId,
+    opts.role,
+    opts.content,
+    opts.sources ? JSON.stringify(opts.sources) : null,
+    opts.projectId ?? null,
+  ]);
+  stmt.free();
+  const r = db.exec('SELECT last_insert_rowid()');
+  const id = r[0]?.values?.[0]?.[0] as number | undefined;
+  scheduleSave();
+  return typeof id === 'number' ? id : null;
+}
+
+function rowToChat(r: any[]): ChatRow {
+  const sourcesRaw = r[5] as string | null;
+  let sources: ChatRow['sources'] = null;
+  if (sourcesRaw) {
+    try { sources = JSON.parse(sourcesRaw); } catch { sources = null; }
+  }
+  return {
+    id: r[0] as number,
+    ts: r[1] as number,
+    personaId: r[2] as string,
+    role: r[3] as ChatRow['role'],
+    content: r[4] as string,
+    sources,
+    projectId: (r[6] ?? null) as number | null,
+  };
+}
+
+export function listChatsForPersona(personaId: string, limit = 100): ChatRow[] {
+  if (!db) return [];
+  const stmt = db.prepare('SELECT id, ts, persona_id, role, content, sources_json, project_id FROM chats WHERE persona_id = ? ORDER BY ts ASC LIMIT ?');
+  stmt.bind([personaId, Math.max(1, Math.min(500, limit))]);
+  const out: ChatRow[] = [];
+  while (stmt.step()) out.push(rowToChat(stmt.get()));
+  stmt.free();
+  return out;
+}
+
+// One-row-per-persona summary for cell previews. Returns the most recent
+// assistant reply per persona along with the question that triggered it
+// and the turn count. Designed to be called once on render, not per-cell.
+export interface PersonaPreview {
+  personaId: string;
+  lastAssistant: { ts: number; content: string } | null;
+  lastUserQuestion: string | null;
+  turnCount: number;        // user-turn count (assistant replies)
+}
+export function previewByPersona(personaIds: string[]): Record<string, PersonaPreview> {
+  const out: Record<string, PersonaPreview> = {};
+  if (!db) return out;
+  for (const pid of personaIds) {
+    const stmt = db.prepare("SELECT COUNT(*) FROM chats WHERE persona_id = ? AND role = 'assistant'");
+    stmt.bind([pid]); stmt.step();
+    const turnCount = Number(stmt.get()[0] ?? 0);
+    stmt.free();
+
+    const lastAsst = db.prepare("SELECT ts, content FROM chats WHERE persona_id = ? AND role = 'assistant' ORDER BY ts DESC LIMIT 1");
+    lastAsst.bind([pid]);
+    let last: PersonaPreview['lastAssistant'] = null;
+    if (lastAsst.step()) {
+      const r = lastAsst.get();
+      last = { ts: r[0] as number, content: r[1] as string };
+    }
+    lastAsst.free();
+
+    let lastQ: string | null = null;
+    if (last) {
+      const lastUser = db.prepare("SELECT content FROM chats WHERE persona_id = ? AND role = 'user' AND ts <= ? ORDER BY ts DESC LIMIT 1");
+      lastUser.bind([pid, last.ts]);
+      if (lastUser.step()) lastQ = String(lastUser.get()[0] ?? '');
+      lastUser.free();
+    }
+
+    out[pid] = { personaId: pid, lastAssistant: last, lastUserQuestion: lastQ, turnCount };
+  }
+  return out;
+}
+
+// Top N "resume threads" across all personas — most-recently-active first.
+// Used by the pulse strip's resume tile.
+export interface ResumeThread {
+  personaId: string;
+  ts: number;
+  lastQuestion: string;
+  lastReplySnippet: string;
+  turnCount: number;
+}
+export function topResumeThreads(limit = 5): ResumeThread[] {
+  if (!db) return [];
+  const stmt = db.prepare(`
+    SELECT persona_id, MAX(ts) AS last_ts
+    FROM chats
+    WHERE role = 'assistant'
+    GROUP BY persona_id
+    ORDER BY last_ts DESC
+    LIMIT ?
+  `);
+  stmt.bind([Math.max(1, Math.min(20, limit))]);
+  const heads: { personaId: string; ts: number }[] = [];
+  while (stmt.step()) {
+    const r = stmt.get();
+    heads.push({ personaId: r[0] as string, ts: r[1] as number });
+  }
+  stmt.free();
+
+  const out: ResumeThread[] = [];
+  for (const h of heads) {
+    const reply = db.prepare("SELECT content FROM chats WHERE persona_id = ? AND role = 'assistant' AND ts = ? LIMIT 1");
+    reply.bind([h.personaId, h.ts]);
+    const replyContent = reply.step() ? String(reply.get()[0] ?? '') : '';
+    reply.free();
+
+    const q = db.prepare("SELECT content FROM chats WHERE persona_id = ? AND role = 'user' AND ts <= ? ORDER BY ts DESC LIMIT 1");
+    q.bind([h.personaId, h.ts]);
+    const qContent = q.step() ? String(q.get()[0] ?? '') : '';
+    q.free();
+
+    const tc = db.prepare("SELECT COUNT(*) FROM chats WHERE persona_id = ? AND role = 'assistant'");
+    tc.bind([h.personaId]); tc.step();
+    const turns = Number(tc.get()[0] ?? 0);
+    tc.free();
+
+    out.push({
+      personaId: h.personaId,
+      ts: h.ts,
+      lastQuestion: qContent,
+      lastReplySnippet: replyContent.length > 220 ? replyContent.slice(0, 220) + '…' : replyContent,
+      turnCount: turns,
+    });
+  }
+  return out;
+}
+
+// ---- Meta key/value helpers --------------------------------------------
+// Generic key/value store backed by the `meta` table. Used by pulse for
+// last-open timestamps and any other small string-typed config that
+// benefits from surviving restart without a dedicated column.
+export function getMeta(key: string): string | null {
+  if (!db) return null;
+  const stmt = db.prepare('SELECT value FROM meta WHERE key = ?');
+  stmt.bind([key]);
+  if (!stmt.step()) { stmt.free(); return null; }
+  const r = stmt.get();
+  stmt.free();
+  return typeof r[0] === 'string' ? r[0] : null;
+}
+export function setMeta(key: string, value: string): void {
+  if (!db) return;
+  const stmt = db.prepare('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)');
+  stmt.run([key, value]);
+  stmt.free();
+  scheduleSave();
 }
 
 // On boot, mark any 'executing' deploys older than 10 min as 'failed' with
