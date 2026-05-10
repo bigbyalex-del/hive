@@ -65,6 +65,9 @@ const IPC = {
   MarkPulseSeen: 'hive:mark-pulse-seen',
   ListPersonaChats: 'hive:list-persona-chats',
   GetCellPreviews: 'hive:get-cell-previews',
+  ListDrafts: 'hive:list-drafts',
+  OpenDraftFolder: 'hive:open-draft-folder',
+  OpenDraftHero: 'hive:open-draft-hero',
 };
 
 contextBridge.exposeInMainWorld('hive', {
@@ -157,6 +160,9 @@ contextBridge.exposeInMainWorld('hive', {
   markPulseSeen: () => ipcRenderer.invoke(IPC.MarkPulseSeen),
   listPersonaChats: (personaId: string, limit?: number) => ipcRenderer.invoke(IPC.ListPersonaChats, { personaId, limit: limit ?? 100 }),
   getCellPreviews: (personaIds: string[]) => ipcRenderer.invoke(IPC.GetCellPreviews, personaIds),
+  listDrafts: () => ipcRenderer.invoke(IPC.ListDrafts),
+  openDraftFolder: (slug: string) => ipcRenderer.invoke(IPC.OpenDraftFolder, slug),
+  openDraftHero: (slug: string) => ipcRenderer.invoke(IPC.OpenDraftHero, slug),
   onBabysitLog: (cb: (line: string) => void) => {
     const listener = (_: Electron.IpcRendererEvent, line: string) => cb(line);
     ipcRenderer.on(IPC.BabysitLog, listener);

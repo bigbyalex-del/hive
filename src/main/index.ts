@@ -23,6 +23,7 @@ import { listAlerts as dbListAlerts, setAlertStatus, deleteAlertRow, reconcileSt
 import { extractIntent as deployExtractIntent, preparePlan as deployPreparePlan, executePlan as deployExecutePlan, rollback as deployRollback, deployHistory } from './deploy';
 import { getPulse as pulseGet, markPulseSeen as pulseMarkSeen } from './pulse';
 import { listChatsForPersona, previewByPersona } from './db';
+import { listDrafts as draftsList, openDraftFolderInExplorer, openHeroInPlayer } from './drafts';
 
 dotenv.config({ path: path.join(__dirname, '..', '..', '.env') });
 
@@ -548,6 +549,14 @@ app.whenReady().then(async () => {
       return { ok: false, error: err?.message ?? String(err), previews: {} };
     }
   });
+
+  // ---- Drafts (fxv-content) ------------------------------------------
+  ipcMain.handle(IPC.ListDrafts, () => {
+    try { return { ok: true, drafts: draftsList() }; }
+    catch (err: any) { return { ok: false, error: err?.message ?? String(err), drafts: [] }; }
+  });
+  ipcMain.handle(IPC.OpenDraftFolder, (_e, slug: string) => openDraftFolderInExplorer(String(slug ?? '')));
+  ipcMain.handle(IPC.OpenDraftHero, (_e, slug: string) => openHeroInPlayer(String(slug ?? '')));
 
   ipcMain.handle(IPC.GetWorkerDiff, async (_e, workerId: string) => {
     try {

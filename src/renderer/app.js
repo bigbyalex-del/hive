@@ -3244,6 +3244,135 @@ function attachLeadSynthesis() {
   }).catch(() => {});
 }
 setTimeout(attachLeadSynthesis, 800);
+
+// ============================================================
+// DRAFTS ROW — fxv-content/drafts/* surfaced as cards
+// Hover to play hero video preview muted, click to open the
+// folder in the OS file explorer.
+// ============================================================
+
+const draftsRowEl = document.getElementById('drafts-row');
+const draftsRowCardsEl = document.getElementById('drafts-row-cards');
+const draftsRowCountEl = document.getElementById('drafts-row-count');
+const draftsRowRefreshLink = document.getElementById('drafts-row-refresh');
+
+let _seenDraftSlugs = new Set();
+let _draftsRowFirstPaint = true;
+
+const PERSONA_COLOR_FALLBACK = 'var(--accent)';
+
+function renderDraftCard(d, isNew) {
+  const card = document.createElement('div');
+  card.className = 'draft-card' + (isNew ? ' is-new' : '');
+  card.dataset.slug = d.slug;
+  card.title = d.title + (d.intro ? '\n\n' + d.intro : '');
+
+  // Video preview if hero.mp4 exists; else gradient placeholder
+  let mediaHtml;
+  if (d.heroPath) {
+    // file:// URL via Electron — works in renderer with webSecurity defaults
+    const fileUrl = 'file:///' + String(d.heroPath).replace(/\\/g, '/').replace(/^\/+/, '');
+    mediaHtml = `<video class="draft-card-video" src="${escapeHtml(fileUrl)}" muted preload="metadata" playsinline></video>`;
+  } else {
+    mediaHtml = `<div class="draft-card-video-placeholder">no hero render</div>`;
+  }
+
+  // Persona pips — coloured dots
+  const pipsHtml = (d.personas || []).slice(0, 4).map(pid => {
+    const color = (typeof PERSONA_COLOR !== 'undefined' && PERSONA_COLOR[pid]) || PERSONA_COLOR_FALLBACK;
+    const personaName = (advisorList.find(a => a.id === pid) || {}).name || pid;
+    return `<span class="draft-card-persona-pip" style="background:${color};" title="${escapeHtml(personaName)}"></span>`;
+  }).join('');
+
+  // Artifact dots — green check / muted dash for each expected artifact
+  const a = d.artifacts || {};
+  const artifactsHtml = `
+    <span class="${a.hasPostHtml ? 'has' : 'miss'}" title="post.html ${a.hasPostHtml ? 'present' : 'missing'}">html</span>
+    <span class="${a.hasHeroMp4 ? 'has' : 'miss'}" title="hero.mp4 ${a.hasHeroMp4 ? 'present' : 'missing'}">mp4</span>
+    <span class="${a.hasIgCarousel ? 'has' : 'miss'}" title="ig-carousel.json ${a.hasIgCarousel ? 'present' : 'missing'}">ig</span>
+    <span class="${a.hasTiktokScript ? 'has' : 'miss'}" title="tiktok-script.md ${a.hasTiktokScript ? 'present' : 'missing'}">tt</span>
+    <span class="${a.hasTwitterThread ? 'has' : 'miss'}" title="twitter-thread.md ${a.hasTwitterThread ? 'present' : 'missing'}">tw</span>
+  `;
+
+  card.innerHTML = `
+    ${mediaHtml}
+    <div class="draft-card-body">
+      <div class="draft-card-title">${escapeHtml(d.title)}</div>
+      <div class="draft-card-personas">${pipsHtml}</div>
+      <div class="draft-card-artifacts">${artifactsHtml}</div>
+      <div class="draft-card-meta">
+        <span>${escapeHtml(d.date || '')}</span>
+        <span>${d.readTime ? d.readTime + ' min' : ''}</span>
+      </div>
+    </div>
+  `;
+
+  // Hover to play, leave to pause + reset
+  const video = card.querySelector('video.draft-card-video');
+  if (video) {
+    card.addEventListener('mouseenter', () => {
+      video.currentTime = 0;
+      video.loop = true;
+      const p = video.play();
+      if (p && p.catch) p.catch(() => { /* autoplay blocked is fine */ });
+    });
+    card.addEventListener('mouseleave', () => {
+      try { video.pause(); video.currentTime = 0; } catch { /* fine */ }
+    });
+  }
+
+  // Click → open the folder (or Shift+Click → just play hero)
+  card.addEventListener('click', (e) => {
+    if (e.shiftKey) {
+      window.hive.openDraftHero(d.slug).catch(() => {});
+    } else {
+      window.hive.openDraftFolder(d.slug).catch(() => {});
+    }
+  });
+
+  return card;
+}
+
+async function refreshDraftsRow() {
+  let res;
+  try { res = await window.hive.listDrafts(); } catch { return; }
+  if (!res || !res.ok) return;
+  const drafts = res.drafts || [];
+
+  if (drafts.length === 0) {
+    draftsRowEl.style.display = 'none';
+    return;
+  }
+
+  draftsRowEl.style.display = 'block';
+  draftsRowCountEl.textContent = drafts.length === 1 ? '1 draft' : drafts.length + ' drafts';
+
+  // Detect newly-arrived drafts (not seen on a prior tick) so we can pulse them
+  const currentSlugs = new Set(drafts.map(d => d.slug));
+  const newSlugs = _draftsRowFirstPaint ? new Set() : new Set([...currentSlugs].filter(x => !_seenDraftSlugs.has(x)));
+
+  draftsRowCardsEl.innerHTML = '';
+  for (const d of drafts) {
+    const isNew = newSlugs.has(d.slug);
+    draftsRowCardsEl.appendChild(renderDraftCard(d, isNew));
+  }
+
+  _seenDraftSlugs = currentSlugs;
+  _draftsRowFirstPaint = false;
+}
+
+if (draftsRowRefreshLink) {
+  draftsRowRefreshLink.addEventListener('click', (e) => {
+    e.preventDefault();
+    refreshDraftsRow();
+  });
+}
+
+// First paint + 30s polling
+if (document.body.classList.contains('mode-fxv-advise')) {
+  setTimeout(refreshDraftsRow, 700);
+  setInterval(refreshDraftsRow, 30_000);
+}
 // Refresh after any chat reply
 const _origExtractActionsFor = window.__extractActionsFor;
 window.__extractActionsFor = async (personaId, question, reply) => {

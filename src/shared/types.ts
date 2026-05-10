@@ -91,6 +91,9 @@ export const IPC = {
   MarkPulseSeen: 'hive:mark-pulse-seen',
   ListPersonaChats: 'hive:list-persona-chats',
   GetCellPreviews: 'hive:get-cell-previews',
+  ListDrafts: 'hive:list-drafts',
+  OpenDraftFolder: 'hive:open-draft-folder',
+  OpenDraftHero: 'hive:open-draft-hero',
 } as const;
 
 export type AgentEvent =
