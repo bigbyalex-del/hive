@@ -8,11 +8,62 @@ Started 2026-05-04. Owner: Alex.
 
 ## 🌅 Next Session — pick up here (2026-05-11)
 
-### 0. State as of end-of-day 2026-05-10
+### 0. State as of end-of-day 2026-05-10 (later)
 
-- **17 commits ahead of origin** — last push pre-`a46a0cd`. Ready to `git push`.
+- **2 commits ahead of origin** (deploy backend + UI) on top of the earlier 18 already pushed. Ready to push.
 - **Working tree:** clean.
-- **The big shift since 2026-05-06:** Hive is now first and foremost an **FXV advisor surface** (`mode-fxv-advise` is the default body class). The build-mode (workers + babysit + templates) is still wired and 1 line away — flip the body class to `mode-build` to restore — but day-to-day use is now domain-specialist chat, council, ship-audit, alert triage.
+- **The big shift today:** Hive went from "thing I chat with about FXV" to "thing that ships FXV." The new `⏏ deploy` modal drives `eas update` end-to-end with safety gates, rollback prep, and live audit — verified end-to-end (without ever actually shipping) against the live FXV repo.
+- **The earlier shift since 2026-05-06:** Hive was already pivoted to FXV advisor mode (`mode-fxv-advise` is the default body class). Build-mode (workers / babysit / templates) is still wired and 1 line away.
+
+### 0a. v2.1 deploy worker — what landed today
+
+| # | Commit | Shipped |
+|---|---|---|
+| 1 | `411c913` | **fix(alerts): Supabase poller** — was using wrong table (`edge_logs` → `function_edge_logs`), missing required `iso_timestamp_start/end` query params, and reading `metadata.method` instead of `metadata.request.method`. Verified end-to-end with 3 real edge-function logs. |
+| 2 | `ec56134` | **v2.1 backend: deploy worker** — `deploy.ts` (preparePlan/executePlan/rollback/extractIntent), deploys table + helpers, IPC for 6 channels, `reconcileStuckDeploys()` on boot. Two-phase always (prepare → confirm → execute), production needs literal word "production" in confirmation. Captures rollback target BEFORE any push. Smoke-tests by re-querying channel head. |
+| 3 | `dee933b` | **v2.1 UI: deploy modal** — intent / plan / execute / history panes. Channel toggle defaults to preview every open. Live log streaming via DeployLog IPC. ROLLBACK button only appears if a previous group was captured. |
+
+### 0b. Smoke-test sequence (do this when you first try it)
+
+1. `npm start` — titlebar shows new `⏏ deploy` link.
+2. Click it. Type: **"ship the paywall fix"** → wait 700ms (debounced LLM intent), watch the message field auto-fill with "Paywall fix" or similar.
+3. Channel should default to PREVIEW (red PRODUCTION button is unselected). Hit PREPARE. Wait ~30-60s for typecheck.
+4. Plan pane appears. Confirm:
+   - preflight rows: working tree clean ✓, on programme-rationale-visible (warning, not blocker), cooldown ✓, typecheck ✓
+   - diff summary is the LLM release note
+   - rollbackPrep — captured will say ⚠ "no prior update group" because we've never shipped via Hive
+   - blockers: none. warnings: 1 (branch mismatch).
+5. Click SHIP TO PREVIEW. Execute pane streams `eas update` output. Smoke at the end confirms the new group is live.
+6. Open the history tab — row appears, status=shipped, with the new group id.
+7. **Production test:** Open deploy again, type "ship the paywall fix to production" — channel auto-flips to PRODUCTION (red). Type production-channel message. Hit PREPARE. Plan pane shows confirm input. Without typing "production", the SHIP button stays disabled. Type "production" → button enables → click → ships.
+
+### 0c. Safety gates built into the deploy worker
+
+| Gate | What it does |
+|---|---|
+| Two-phase always | Prepare runs preflight + diff + rollback capture; nothing executes until you click SHIP a second time. |
+| Channel default | PREVIEW every modal-open; PRODUCTION is never sticky across sessions. |
+| Production confirmation | The literal word "production" must be typed into a confirm input. The LLM never gets to set it. |
+| Cooldown | 10 min between production ships on the same channel (blocking); preview cooldown is non-blocking. |
+| Working tree clean | Blocker. EAS ships disk state, not commits — uncommitted changes would silently slip through. |
+| Branch mismatch | Warning only — the FXV active branch isn't always main. |
+| Typecheck | Blocker by default; "skip typecheck" checkbox available, logs the override. |
+| Rollback prep | Captures the previous EAS update group BEFORE the new push. ROLLBACK button uses it. |
+| Smoke test | Re-queries channel head after `eas update` and confirms the new group is live. Mismatch is surfaced, not auto-rolled-back. |
+| Audit log | Every transition lands in `~/.hive/audit.jsonl` + the `deploys` table. |
+| Stuck reconcile | Any 'executing' rows older than 10 min get marked failed on boot — crash mid-deploy doesn't leave history lying. |
+| LLM separation | `extractIntent` is a Haiku call; the deterministic eas spawn never touches the LLM output for the channel decision. |
+
+### 0d. Known limitations of the deploy worker
+
+- **Update channel only.** `eas build` + `eas submit` are not wired yet (different risk profile, longer running). v2.2.
+- **One project.** FXV only; the TARGETS map is single-entry. Add Maths + future apps when needed.
+- **No per-deploy cost cap.** EAS update is free; build/submit are not. Add when build/submit lands.
+- **shell:true Node deprecation warning.** Args are all controlled (channel enum, JSON.stringify-quoted message, regex-validated group id) but worth moving to shell:false next pass.
+- **Smoke could go deeper.** Currently just confirms the new group is the channel head. A stretch v2.x would fetch the manifest, parse the bundle, and assert key exports survive — auto-rollback on mismatch.
+- **No notification.** When you ship in production at 11pm, nothing pings you with the result other than the modal you're already looking at. Feeds the "ambient Hive" theme from yesterday's brain-dump.
+
+### 1. Earlier pickup (2026-05-10 morning) state — still relevant
 
 ### 1. v2.0 commits (2026-05-10)
 
