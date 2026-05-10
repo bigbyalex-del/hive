@@ -67,6 +67,20 @@ export const IPC = {
   BabysitStop: 'hive:babysit-stop',
   BabysitStatus: 'hive:babysit-status',
   BabysitLog: 'hive:babysit-log',
+  ListAdvisors: 'hive:list-advisors',
+  ConsultAdvisor: 'hive:consult-advisor',
+  RefreshSeeds: 'hive:refresh-seeds',
+  RefreshSeedsLog: 'hive:refresh-seeds-log',
+  ExtractActions: 'hive:extract-actions',
+  RunCouncil: 'hive:run-council',
+  RunShipAudit: 'hive:run-ship-audit',
+  ShipAuditProgress: 'hive:ship-audit-progress',
+  ListAlerts: 'hive:list-alerts',
+  AckAlert: 'hive:ack-alert',
+  DeleteAlert: 'hive:delete-alert',
+  PollAlertsNow: 'hive:poll-alerts-now',
+  AlertsConfig: 'hive:alerts-config',
+  AlertEvent: 'hive:alert-event',
 } as const;
 
 export type AgentEvent =

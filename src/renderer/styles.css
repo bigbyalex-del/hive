@@ -1,3 +1,25 @@
+/* FXV advisor mode hides shipping-era UI. Build-mode-only elements are
+   tagged with `.mode-build-only`; toggling the body class flips them off. */
+body.mode-fxv-advise .mode-build-only { display: none !important; }
+body.mode-fxv-advise .cancel-btn,
+body.mode-fxv-advise .override-btn,
+body.mode-fxv-advise .diff-btn,
+body.mode-fxv-advise .status,
+body.mode-fxv-advise .footstats .tokens { display: none !important; }
+body.mode-fxv-advise .cell .head { align-items: flex-start; }
+body.mode-fxv-advise .cell.advisor-cell {
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+  border-left: 3px solid var(--persona-color, var(--accent));
+}
+body.mode-fxv-advise .cell.advisor-cell:hover {
+  border-color: var(--persona-color, var(--accent));
+  box-shadow: inset 0 0 0 1px var(--persona-color, var(--accent));
+  background: rgba(255, 255, 255, 0.02);
+}
+body.mode-fxv-advise .cell.advisor-lead {
+  border-left: 3px solid var(--persona-color, var(--manager));
+}
+
 :root {
   --bg: #0b0f14;
   --panel: #111821;
@@ -73,6 +95,61 @@ body {
 .taskbar button:hover { filter: brightness(1.1); }
 .taskbar button:disabled { opacity: 0.5; cursor: not-allowed; }
 
+.page-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 4px 4px;
+}
+.page-bar-label {
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  color: var(--muted);
+  font-weight: 600;
+}
+.page-bar-buttons {
+  display: flex;
+  gap: 8px;
+  flex: 1;
+  flex-wrap: wrap;
+}
+.page-pill {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 14px;
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  border-left: 3px solid var(--page-color, var(--accent));
+  border-radius: 4px;
+  cursor: pointer;
+  min-width: 140px;
+  transition: background 0.12s, border-color 0.12s, box-shadow 0.12s;
+}
+.page-pill:hover {
+  background: rgba(255, 255, 255, 0.03);
+  box-shadow: inset 0 0 0 1px var(--page-color, var(--accent));
+}
+.page-pill .page-pill-name {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--page-color, var(--accent));
+  letter-spacing: 0.6px;
+}
+.page-pill .page-pill-hint {
+  font-size: 9px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+
+.workspace {
+  flex: 1;
+  display: flex;
+  gap: 12px;
+  min-height: 0;
+}
+
 .grid {
   flex: 1;
   display: grid;
@@ -80,6 +157,261 @@ body {
   grid-template-rows: 1fr 1.3fr 1fr;
   gap: 10px;
   min-height: 0;
+  min-width: 0;
+}
+
+.brainstorm {
+  width: 320px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  transition: width 0.2s, padding 0.2s;
+}
+.brainstorm.collapsed {
+  width: 32px;
+}
+.brainstorm.collapsed .brainstorm-input-wrap,
+.brainstorm.collapsed .brainstorm-list,
+.brainstorm.collapsed .brainstorm-head strong {
+  display: none;
+}
+.brainstorm-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+.brainstorm-head strong {
+  color: var(--accent);
+  font-size: 11px;
+  letter-spacing: 1.5px;
+}
+.brainstorm-head a {
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 13px;
+}
+.brainstorm-input-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+#brainstorm-input {
+  background: var(--panel-2);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 11px;
+  resize: vertical;
+  min-height: 40px;
+  max-height: 160px;
+}
+.brainstorm-input-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.brainstorm-meta {
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: 0.5px;
+}
+#brainstorm-add {
+  background: var(--accent);
+  border: none;
+  color: #00171f;
+  font-weight: 700;
+  font-family: inherit;
+  font-size: 11px;
+  padding: 4px 12px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.brainstorm-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.brainstorm-note {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--note-color, var(--accent));
+  border-radius: 4px;
+  padding: 8px 10px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  position: relative;
+}
+.brainstorm-note .note-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 9px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.brainstorm-note .note-source {
+  color: var(--note-color, var(--accent));
+  font-weight: 600;
+}
+.brainstorm-note .note-actions {
+  display: flex;
+  gap: 8px;
+}
+.brainstorm-note .note-actions a {
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 9px;
+  cursor: pointer;
+}
+.brainstorm-note .note-actions a:hover {
+  color: var(--text);
+}
+.brainstorm-note .note-body {
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 9em;
+  overflow: hidden;
+  position: relative;
+}
+.brainstorm-note .note-body.expanded {
+  max-height: none;
+}
+.brainstorm-empty {
+  text-align: center;
+  font-size: 11px;
+  color: var(--muted);
+  padding: 24px 12px;
+  font-style: italic;
+}
+
+.brainstorm-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+.bs-tab {
+  flex: 1;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  padding: 8px 6px;
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s;
+}
+.bs-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+.bs-tab-count {
+  display: inline-block;
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 9px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  margin-left: 4px;
+  letter-spacing: 0;
+}
+.bs-pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.brainstorm.collapsed .brainstorm-tabs,
+.brainstorm.collapsed .bs-pane {
+  display: none;
+}
+.action-item {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--note-color, var(--accent));
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-size: 11px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.action-item.done {
+  opacity: 0.5;
+}
+.action-item.done .action-summary {
+  text-decoration: line-through;
+}
+.action-item .action-checkbox {
+  margin-top: 2px;
+  flex-shrink: 0;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+.action-item .action-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.action-item .action-summary {
+  color: var(--text);
+  line-height: 1.4;
+  word-break: break-word;
+}
+.action-item .action-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.action-item .action-source {
+  color: var(--note-color, var(--accent));
+  font-weight: 600;
+}
+.action-item .action-urgency-high { color: var(--error); }
+.action-item .action-urgency-medium { color: var(--waiting); }
+.action-item .action-urgency-low { color: var(--muted); }
+.action-item .action-delete {
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 13px;
+  cursor: pointer;
+  opacity: 0.7;
+  padding: 0 4px;
+  align-self: flex-start;
+  flex-shrink: 0;
+  line-height: 1;
+}
+.action-item .action-delete:hover {
+  color: var(--error);
+  opacity: 1;
 }
 
 .cell {

@@ -1,4 +1,48 @@
 // Hive renderer — wires the dashboard to the main process via window.hive.
+//
+// FXV ADVISOR MODE — the 9 grid cells are domain specialists (8 workers +
+// Programme Lead in the centre). Cells are chat surfaces, not code workers.
+// Clicking any cell opens that specialist's chat.
+
+// Cell → persona id mapping. Owns the visible layout of the dashboard.
+const CELL_TO_PERSONA = {
+  W1: 'fxv:aerobic',
+  W2: 'fxv:strength',
+  W3: 'fxv:concurrent',
+  W4: 'fxv:load',
+  M:  'fxv:manager',
+  W5: 'fxv:readiness',
+  W6: 'fxv:coach',
+  W7: 'fxv:uiux',
+  W8: 'fxv:marketing',
+};
+
+// Per-persona accent colour. Picked so each cell + chat header is visually
+// distinct without colliding with existing chrome (cyan accent, error red).
+const PERSONA_COLOR = {
+  'fxv:aerobic':    '#38bdf8',  // sky-blue (breath / endurance)
+  'fxv:strength':   '#f59e0b',  // amber (heavy iron)
+  'fxv:concurrent': '#a78bfa',  // soft violet (hybrid)
+  'fxv:load':       '#2dd4bf',  // teal (measurement / lab)
+  'fxv:readiness':  '#4ade80',  // green (recovery)
+  'fxv:coach':      '#fbbf24',  // honey (warm voice)
+  'fxv:uiux':       '#f472b6',  // pink (design)
+  'fxv:marketing':  '#fb923c',  // orange (growth / attention)
+  'fxv:manager':    '#c084fc',  // violet (synthesis — matches existing manager hue)
+  // Page-specific sub-agents — pastels so they read as a separate tier.
+  'fxv:page-today':     '#93c5fd',  // pale blue
+  'fxv:page-programme': '#c4b5fd',  // pale violet
+  'fxv:page-coach':     '#fcd34d',  // pale gold
+  'fxv:page-health':    '#fca5a5',  // pale coral
+};
+
+// Page agents render as a strip across the top, in this order.
+const PAGE_AGENTS_ORDER = [
+  'fxv:page-today',
+  'fxv:page-programme',
+  'fxv:page-coach',
+  'fxv:page-health',
+];
 
 const AGENTS = [
   { id: 'W1', row: 0, col: 0 },
@@ -920,8 +964,17 @@ micBtn.addEventListener('mousedown', startRecording);
 micBtn.addEventListener('mouseup', stopRecording);
 micBtn.addEventListener('mouseleave', () => { if (isRecording) stopRecording(); });
 
+// Push-to-talk on Space, but only when no text field has focus — otherwise
+// typing a space anywhere swallows the keystroke and triggers the mic.
+function isTypingTarget(el) {
+  if (!el) return false;
+  const tag = el.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA') return true;
+  if (el.isContentEditable) return true;
+  return false;
+}
 window.addEventListener('keydown', (e) => {
-  if (e.code === 'Space' && document.activeElement !== taskInput && !isRecording && !e.repeat) {
+  if (e.code === 'Space' && !isTypingTarget(document.activeElement) && !isRecording && !e.repeat) {
     e.preventDefault();
     startRecording();
   }
@@ -1080,7 +1133,9 @@ function applyProjectType(t) {
   resizeAnnotCanvas();
 }
 projectTypeSel.addEventListener('change', () => applyProjectType(projectTypeSel.value));
-applyProjectType(projectType);
+// Initial apply is deferred until after annotCanvas is initialized further
+// down — calling resizeAnnotCanvas() here hits a TDZ on `const annotCanvas`
+// and halts the rest of the script (including the advisors panel wiring).
 
 // Auto-bump project type when user scaffolds a template that implies one.
 const TPL_TO_TYPE = { 'expo-rn': 'ios', 'html-spa': 'web', 'react-vite': 'web', 'express-api': 'api' };
@@ -1118,6 +1173,11 @@ const annotWorkerSel = document.getElementById('annot-worker');
 let annotDrawing = false;
 let annotHasStrokes = false;
 let annotMode = false;
+
+// Now that annotCanvas exists, do the initial project-type apply that we
+// deferred earlier. Calling it here lets resizeAnnotCanvas() touch the canvas
+// safely.
+applyProjectType(projectType);
 
 function resizeAnnotCanvas() {
   const rect = annotCanvas.getBoundingClientRect();
@@ -1236,4 +1296,1127 @@ async function sendAnnotation() {
 annotSendBtn.addEventListener('click', sendAnnotation);
 annotCommentInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') sendAnnotation();
+});
+
+// ----- FXV advisors -----
+// Chat-only domain specialists. Each persona has its own memory namespace
+// seeded by `npm run seed:fxv`. Replies are grounded in retrieved sources
+// and lint-checked for citations before they reach the user.
+
+const advisorsModal = document.getElementById('advisors-modal');
+const advisorsListEl = document.getElementById('advisors-list');
+const advisorHeader = document.getElementById('advisor-header');
+const advisorChat = document.getElementById('advisor-chat');
+const advisorInput = document.getElementById('advisor-input');
+const advisorSend = document.getElementById('advisor-send');
+
+let advisorList = [];
+let activeAdvisorId = null;
+const advisorHistories = new Map(); // personaId -> [{role, content}]
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+
+function renderAdvisorList() {
+  advisorsListEl.innerHTML = advisorList.map(a => {
+    const color = PERSONA_COLOR[a.id] || 'var(--accent)';
+    return `
+    <div class="advisor-row${a.id === activeAdvisorId ? ' active' : ''}" data-id="${a.id}" data-color="${color}" style="padding:8px 14px;cursor:pointer;border-left:3px solid transparent;">
+      <div style="font-size:12px;color:${color};font-weight:600;letter-spacing:0.3px;">${escapeHtml(a.name)}</div>
+      <div style="font-size:10px;color:var(--muted);margin-top:2px;line-height:1.4;">${escapeHtml(a.title)}</div>
+    </div>
+  `;
+  }).join('');
+  advisorsListEl.querySelectorAll('.advisor-row').forEach(row => {
+    row.addEventListener('click', () => selectAdvisor(row.dataset.id));
+  });
+}
+
+function selectAdvisor(id) {
+  activeAdvisorId = id;
+  const a = advisorList.find(x => x.id === id);
+  const color = PERSONA_COLOR[id] || 'var(--accent)';
+  advisorsListEl.querySelectorAll('.advisor-row').forEach(r => {
+    const rowColor = r.dataset.color || 'var(--accent)';
+    r.classList.toggle('active', r.dataset.id === id);
+    r.style.background = r.dataset.id === id ? 'var(--panel)' : '';
+    r.style.borderLeftColor = r.dataset.id === id ? rowColor : 'transparent';
+  });
+  if (a) {
+    advisorHeader.innerHTML = `<span style="color:${color};font-weight:600;">${escapeHtml(a.name)}</span> <span style="color:var(--muted);">— ${escapeHtml(a.scope)}</span>`;
+  } else {
+    advisorHeader.textContent = '';
+  }
+  renderAdvisorChat();
+  advisorInput.focus();
+}
+
+function renderAdvisorChat() {
+  if (!activeAdvisorId) { advisorChat.innerHTML = '<div style="color:var(--muted);font-size:12px;">Select an advisor to start.</div>'; return; }
+  const hist = advisorHistories.get(activeAdvisorId) ?? [];
+  if (hist.length === 0) {
+    advisorChat.innerHTML = '<div style="color:var(--muted);font-size:12px;">No conversation yet — ask a question below.</div>';
+    return;
+  }
+  advisorChat.innerHTML = hist.map(m => {
+    if (m.role === 'user') {
+      return `<div style="align-self:flex-end;max-width:75%;background:var(--panel-2);border:1px solid var(--border);border-radius:6px;padding:8px 12px;font-size:12px;line-height:1.5;color:var(--text);">${escapeHtml(m.content)}</div>`;
+    }
+    const sourcesHtml = m.sources && m.sources.length
+      ? `<div style="margin-top:8px;font-size:10px;color:var(--muted);"><div style="text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">sources</div>${m.sources.map(s => `<div>[${s.index}] ${escapeHtml(s.label)} <span style="opacity:0.6;">(score ${s.score.toFixed(2)})</span></div>`).join('')}</div>`
+      : '';
+    const warning = m.citationMissingCount > 0
+      ? `<div style="margin-top:6px;font-size:10px;color:var(--error,#ff7777);">⚠ ${m.citationMissingCount} claim(s) without citation — answer may be partly ungrounded.</div>`
+      : '';
+    const replyColor = PERSONA_COLOR[activeAdvisorId] || 'var(--accent)';
+    const pinBtn = `<a href="#" class="pin-reply-btn" data-content="${encodeURIComponent(m.content)}" style="position:absolute;top:6px;right:8px;color:var(--muted);text-decoration:none;font-size:11px;opacity:0.5;" title="Pin to brainstorm">◎ pin</a>`;
+    return `<div style="position:relative;align-self:flex-start;max-width:85%;background:rgba(0,42,58,0.4);border:1px solid var(--border-strong);border-left:3px solid ${replyColor};border-radius:6px;padding:10px 28px 10px 14px;font-size:12px;line-height:1.55;color:var(--text);white-space:pre-wrap;">${pinBtn}${escapeHtml(m.content)}${sourcesHtml}${warning}</div>`;
+  }).join('');
+  advisorChat.scrollTop = advisorChat.scrollHeight;
+}
+
+async function loadAdvisors() {
+  const res = await window.hive.listAdvisors();
+  if (res && res.ok) {
+    advisorList = res.advisors;
+    renderAdvisorList();
+    if (!activeAdvisorId && advisorList.length) selectAdvisor(advisorList[0].id);
+    paintAdvisorGrid();
+    paintPageBar();
+  } else {
+    advisorsListEl.innerHTML = `<div style="padding:14px;font-size:11px;color:var(--error,#ff7777);">Failed to load advisors: ${escapeHtml((res && res.error) || 'unknown')}</div>`;
+  }
+}
+
+// Render the 4 page pills across the top. Click a pill → open the advisor
+// modal pre-selected on that page agent.
+function paintPageBar() {
+  const wrap = document.getElementById('page-bar-buttons');
+  if (!wrap) return;
+  const pages = PAGE_AGENTS_ORDER
+    .map(id => advisorList.find(a => a.id === id))
+    .filter(Boolean);
+  if (pages.length === 0) {
+    wrap.innerHTML = '<span style="font-size:11px;color:var(--muted);">no page agents loaded</span>';
+    return;
+  }
+  wrap.innerHTML = pages.map(p => {
+    const color = PERSONA_COLOR[p.id] || 'var(--accent)';
+    return `
+      <button class="page-pill" data-id="${p.id}" style="--page-color:${color};font-family:inherit;color:var(--text);">
+        <span class="page-pill-name">${escapeHtml(p.name.toUpperCase())}</span>
+        <span class="page-pill-hint">tap to chat →</span>
+      </button>
+    `;
+  }).join('');
+  wrap.querySelectorAll('.page-pill').forEach(btn => {
+    btn.addEventListener('click', () => {
+      advisorsModal.style.display = 'flex';
+      selectAdvisor(btn.dataset.id);
+    });
+  });
+}
+
+// Rewrite each grid cell as a chat surface for its mapped specialist. Hides
+// shipping-era buttons (cancel / override / diff) and makes the whole cell
+// clickable to open the advisor modal pre-selected on that persona.
+function paintAdvisorGrid() {
+  for (const [cellId, personaId] of Object.entries(CELL_TO_PERSONA)) {
+    const persona = advisorList.find(p => p.id === personaId);
+    const cell = cells.get(cellId);
+    if (!persona || !cell) continue;
+
+    const isLead = !!persona.isManager;
+    cell.el.classList.add('advisor-cell');
+    if (isLead) cell.el.classList.add('advisor-lead');
+
+    const color = PERSONA_COLOR[persona.id] || 'var(--accent)';
+    cell.el.style.setProperty('--persona-color', color);
+
+    // Rebuild head: NAME + role-line. Drop status pill + buttons.
+    const head = cell.el.querySelector('.head');
+    if (head) {
+      head.innerHTML = `
+        <div class="id" style="color:${color};">${isLead ? '◆ ' : ''}${escapeHtml(persona.name.toUpperCase())}<span class="tag" style="color:${color};opacity:0.7;">${isLead ? 'programme lead' : 'specialist'}</span></div>
+        <div style="font-size:10px;color:${color};text-transform:uppercase;letter-spacing:1px;opacity:0.85;">tap to chat →</div>
+      `;
+    }
+    // Repurpose .task as the scope blurb.
+    if (cell.taskEl) {
+      cell.taskEl.classList.remove('empty');
+      cell.taskEl.textContent = persona.scope;
+      cell.taskEl.style.fontStyle = 'normal';
+      cell.taskEl.style.opacity = '0.85';
+    }
+    // .log holds the most recent assistant reply preview.
+    if (cell.logEl) {
+      cell.logEl.textContent = '— no conversation yet —';
+      cell.logEl.style.opacity = '0.55';
+    }
+    // Footer: turn count + a hint.
+    const footer = cell.el.querySelector('.footstats');
+    if (footer) {
+      footer.innerHTML = `<span>${escapeHtml(persona.title)}</span><span><span class="advisor-turns">0</span> turns</span>`;
+    }
+
+    // Whole-cell click → open chat (avoiding text-select drag noise).
+    cell.el.style.cursor = 'pointer';
+    cell.el.addEventListener('click', (e) => {
+      // Don't open the modal when text is being selected
+      const sel = window.getSelection();
+      if (sel && sel.toString().length > 0) return;
+      advisorsModal.style.display = 'flex';
+      selectAdvisor(persona.id);
+    });
+  }
+}
+
+// When a chat reply lands, mirror a preview onto the corresponding grid cell
+// and bump its turn counter so the dashboard reflects activity.
+function updateCellAfterReply(personaId, reply) {
+  const cellId = Object.keys(CELL_TO_PERSONA).find(k => CELL_TO_PERSONA[k] === personaId);
+  if (!cellId) return;
+  const cell = cells.get(cellId);
+  if (!cell) return;
+  if (cell.logEl) {
+    cell.logEl.textContent = reply.length > 220 ? reply.slice(0, 220) + '…' : reply;
+    cell.logEl.style.opacity = '1';
+  }
+  const turnsEl = cell.el.querySelector('.advisor-turns');
+  if (turnsEl) turnsEl.textContent = String((advisorHistories.get(personaId) ?? []).filter(m => m.role === 'assistant').length);
+}
+
+async function sendAdvisorMessage() {
+  if (!activeAdvisorId) return;
+  const q = advisorInput.value.trim();
+  if (!q) return;
+  const hist = advisorHistories.get(activeAdvisorId) ?? [];
+  hist.push({ role: 'user', content: q });
+  advisorHistories.set(activeAdvisorId, hist);
+  advisorInput.value = '';
+  renderAdvisorChat();
+
+  // Show a placeholder while the model + retrieval run
+  const thinkingNode = document.createElement('div');
+  thinkingNode.style.cssText = 'align-self:flex-start;color:var(--muted);font-size:11px;font-style:italic;';
+  thinkingNode.textContent = 'thinking…';
+  advisorChat.appendChild(thinkingNode);
+  advisorChat.scrollTop = advisorChat.scrollHeight;
+
+  // Pass the prior turns (excluding the just-pushed user msg) so the
+  // server-side retrieval query gets some pronoun context.
+  const priorHistory = hist.slice(0, -1);
+  try {
+    const res = await window.hive.consultAdvisor(activeAdvisorId, q, priorHistory);
+    thinkingNode.remove();
+    if (res && res.ok) {
+      hist.push({
+        role: 'assistant',
+        content: res.reply,
+        sources: res.sources,
+        citationMissingCount: res.citationMissingCount,
+      });
+    } else {
+      hist.push({ role: 'assistant', content: `(error: ${(res && res.error) || 'unknown'})`, sources: [], citationMissingCount: 0 });
+    }
+    advisorHistories.set(activeAdvisorId, hist);
+    renderAdvisorChat();
+    const last = hist[hist.length - 1];
+    if (last && last.role === 'assistant') {
+      updateCellAfterReply(activeAdvisorId, last.content);
+      window.__extractActionsFor(activeAdvisorId, q, last.content);
+    }
+  } catch (err) {
+    thinkingNode.remove();
+    hist.push({ role: 'assistant', content: `(error: ${err.message || err})`, sources: [], citationMissingCount: 0 });
+    advisorHistories.set(activeAdvisorId, hist);
+    renderAdvisorChat();
+  }
+}
+
+// Delegated pin-button handler — assistant replies render with a ◎ pin
+// link; clicking it pushes the reply to the brainstorm sidebar.
+advisorChat.addEventListener('click', (e) => {
+  const a = e.target.closest('.pin-reply-btn');
+  if (!a) return;
+  e.preventDefault();
+  const content = decodeURIComponent(a.dataset.content || '');
+  if (content && activeAdvisorId) {
+    window.__pinAdvisorReply(activeAdvisorId, content);
+    a.textContent = '✓ pinned';
+    a.style.color = PERSONA_COLOR[activeAdvisorId] || 'var(--accent)';
+    a.style.opacity = '1';
+    setTimeout(() => { a.textContent = '◎ pin'; a.style.color = 'var(--muted)'; a.style.opacity = '0.5'; }, 1100);
+  }
+});
+
+document.getElementById('open-advisors').addEventListener('click', (e) => {
+  e.preventDefault();
+  advisorsModal.style.display = 'flex';
+  if (advisorList.length === 0) loadAdvisors();
+});
+// Paint the grid as soon as the renderer is ready — don't wait for the user
+// to open the modal. listAdvisors() is a cheap JSON read on the main side.
+loadAdvisors();
+
+// ----- Brainstorm sidebar -----
+// Persists pinned agent replies + free-form notes to localStorage so they
+// survive restart. Each note: { id, ts, source: personaId|null, sourceName,
+// content, agentReply (bool) }.
+
+const BRAINSTORM_KEY = 'fxv.brainstorm.notes';
+const BRAINSTORM_COLLAPSED_KEY = 'fxv.brainstorm.collapsed';
+const brainstormEl = document.getElementById('brainstorm');
+const brainstormListEl = document.getElementById('brainstorm-list');
+const brainstormInput = document.getElementById('brainstorm-input');
+const brainstormAddBtn = document.getElementById('brainstorm-add');
+const brainstormCount = document.getElementById('brainstorm-count');
+const brainstormToggle = document.getElementById('brainstorm-toggle');
+
+function loadNotes() {
+  try {
+    const raw = localStorage.getItem(BRAINSTORM_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+function saveNotes(notes) {
+  localStorage.setItem(BRAINSTORM_KEY, JSON.stringify(notes));
+}
+function fmtTs(ts) {
+  const d = new Date(ts);
+  return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+function renderNotes() {
+  const notes = loadNotes();
+  brainstormCount.textContent = notes.length === 1 ? '1 note' : `${notes.length} notes`;
+  if (notes.length === 0) {
+    brainstormListEl.innerHTML = '<div class="brainstorm-empty">No notes yet. Save your own thought above, or pin an agent reply with ◎ from the chat panel.</div>';
+    return;
+  }
+  brainstormListEl.innerHTML = notes.map(n => {
+    const color = n.source ? (PERSONA_COLOR[n.source] || 'var(--accent)') : 'var(--muted)';
+    const sourceName = n.sourceName || 'YOU';
+    return `
+      <div class="brainstorm-note" style="--note-color:${color};" data-id="${n.id}">
+        <div class="note-meta">
+          <span class="note-source">${escapeHtml(sourceName)}</span>
+          <span>${fmtTs(n.ts)}</span>
+        </div>
+        <div class="note-body">${escapeHtml(n.content)}</div>
+        <div class="note-actions">
+          <a class="note-expand" data-id="${n.id}">expand</a>
+          <a class="note-copy" data-id="${n.id}">copy</a>
+          <a class="note-delete" data-id="${n.id}" style="color:var(--error);">delete</a>
+        </div>
+      </div>
+    `;
+  }).join('');
+  brainstormListEl.querySelectorAll('.note-expand').forEach(a => {
+    a.addEventListener('click', (e) => {
+      e.preventDefault();
+      const note = brainstormListEl.querySelector(`.brainstorm-note[data-id="${a.dataset.id}"] .note-body`);
+      if (note) {
+        note.classList.toggle('expanded');
+        a.textContent = note.classList.contains('expanded') ? 'collapse' : 'expand';
+      }
+    });
+  });
+  brainstormListEl.querySelectorAll('.note-copy').forEach(a => {
+    a.addEventListener('click', async (e) => {
+      e.preventDefault();
+      const n = loadNotes().find(x => String(x.id) === a.dataset.id);
+      if (n) {
+        try { await navigator.clipboard.writeText(n.content); a.textContent = 'copied'; setTimeout(() => a.textContent = 'copy', 900); } catch {}
+      }
+    });
+  });
+  brainstormListEl.querySelectorAll('.note-delete').forEach(a => {
+    a.addEventListener('click', (e) => {
+      e.preventDefault();
+      const id = a.dataset.id;
+      const next = loadNotes().filter(x => String(x.id) !== id);
+      saveNotes(next);
+      renderNotes();
+    });
+  });
+}
+
+function addNote(content, source = null, sourceName = null) {
+  const trimmed = String(content || '').trim();
+  if (!trimmed) return;
+  const notes = loadNotes();
+  notes.unshift({
+    id: Date.now(),
+    ts: Date.now(),
+    source,
+    sourceName,
+    content: trimmed,
+  });
+  saveNotes(notes);
+  renderNotes();
+}
+
+brainstormAddBtn.addEventListener('click', () => {
+  addNote(brainstormInput.value);
+  brainstormInput.value = '';
+  brainstormInput.focus();
+});
+brainstormInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+    e.preventDefault();
+    addNote(brainstormInput.value);
+    brainstormInput.value = '';
+  }
+});
+
+brainstormToggle.addEventListener('click', (e) => {
+  e.preventDefault();
+  brainstormEl.classList.toggle('collapsed');
+  const collapsed = brainstormEl.classList.contains('collapsed');
+  localStorage.setItem(BRAINSTORM_COLLAPSED_KEY, collapsed ? '1' : '0');
+  brainstormToggle.textContent = collapsed ? '»' : '«';
+});
+if (localStorage.getItem(BRAINSTORM_COLLAPSED_KEY) === '1') {
+  brainstormEl.classList.add('collapsed');
+  brainstormToggle.textContent = '»';
+}
+
+renderNotes();
+
+// ----- Brainstorm: ACTIONS tab -----
+// Auto-extracted from agent replies via Haiku. Stored alongside notes.
+
+const ACTIONS_KEY = 'fxv.brainstorm.actions';
+const ACTIONS_SORT_KEY = 'fxv.brainstorm.actions.sort';
+const URGENCY_RANK = { high: 0, critical: 0, medium: 1, low: 2 };
+const actionsListEl = document.getElementById('actions-list');
+const bsCountNotes = document.getElementById('bs-count-notes');
+const bsCountActions = document.getElementById('bs-count-actions');
+const actionsClearDone = document.getElementById('actions-clear-done');
+const actionsSortToggle = document.getElementById('actions-sort-toggle');
+
+function getActionsSort() {
+  return localStorage.getItem(ACTIONS_SORT_KEY) === 'priority' ? 'priority' : 'newest';
+}
+function setActionsSort(mode) {
+  localStorage.setItem(ACTIONS_SORT_KEY, mode);
+  if (actionsSortToggle) actionsSortToggle.textContent = `sort: ${mode}`;
+}
+
+function loadActions() {
+  try {
+    const raw = localStorage.getItem(ACTIONS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+function saveActions(actions) {
+  localStorage.setItem(ACTIONS_KEY, JSON.stringify(actions));
+}
+
+function renderActions() {
+  const actions = loadActions();
+  const open = actions.filter(a => a.status !== 'done').length;
+  bsCountActions.textContent = open;
+  if (actions.length === 0) {
+    actionsListEl.innerHTML = '<div class="brainstorm-empty">No actions yet. They\'ll auto-appear when an agent reply suggests one.</div>';
+    return;
+  }
+  // Open actions first, then done at bottom. Within each, sort by chosen mode.
+  const mode = getActionsSort();
+  const sorted = [...actions].sort((a, b) => {
+    if ((a.status === 'done') !== (b.status === 'done')) return a.status === 'done' ? 1 : -1;
+    if (mode === 'priority') {
+      const ra = URGENCY_RANK[a.urgency] ?? 1;
+      const rb = URGENCY_RANK[b.urgency] ?? 1;
+      if (ra !== rb) return ra - rb;
+    }
+    return (b.ts || 0) - (a.ts || 0);
+  });
+  actionsListEl.innerHTML = sorted.map(a => {
+    const color = a.source ? (PERSONA_COLOR[a.source] || 'var(--accent)') : 'var(--muted)';
+    const sourceName = a.sourceName || 'YOU';
+    const urgClass = `action-urgency-${a.urgency || 'medium'}`;
+    return `
+      <div class="action-item ${a.status === 'done' ? 'done' : ''}" data-id="${a.id}" style="--note-color:${color};">
+        <input type="checkbox" class="action-checkbox" data-id="${a.id}" ${a.status === 'done' ? 'checked' : ''} title="Mark done (stays in list, struck through)" />
+        <div class="action-body">
+          <div class="action-summary">${escapeHtml(a.summary)}</div>
+          <div class="action-meta">
+            <span class="action-source">${escapeHtml(sourceName)}</span>
+            <span class="${urgClass}">${escapeHtml((a.urgency || 'medium').toUpperCase())}</span>
+          </div>
+        </div>
+        <a class="action-delete" data-id="${a.id}" title="Delete this action">✕</a>
+      </div>
+    `;
+  }).join('');
+  actionsListEl.querySelectorAll('.action-checkbox').forEach(cb => {
+    cb.addEventListener('change', (e) => {
+      const id = cb.dataset.id;
+      const next = loadActions().map(x =>
+        String(x.id) === id ? { ...x, status: cb.checked ? 'done' : 'todo' } : x
+      );
+      saveActions(next);
+      renderActions();
+    });
+  });
+  actionsListEl.querySelectorAll('.action-delete').forEach(a => {
+    a.addEventListener('click', (e) => {
+      e.preventDefault();
+      const id = a.dataset.id;
+      const next = loadActions().filter(x => String(x.id) !== id);
+      saveActions(next);
+      renderActions();
+    });
+  });
+}
+
+function normalizeActionText(s) {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/^fix\s+(high|medium|low|critical)\s*:\s*/i, '')
+    .replace(/^(fix|add|implement|create|update|build|make|set\s*up|setup|configure|ensure|need\s+to|should|must|consider|try\s+to)\s+/i, '')
+    .replace(/[^a-z0-9 ]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function addAction(summary, urgency, source = null, sourceName = null) {
+  const t = String(summary || '').trim();
+  if (!t) return;
+  const actions = loadActions();
+  // Global dedupe across all sources. Catches: identical text, same intent
+  // with different verb prefixes, and substring overlaps (one wording
+  // contains the other). Length floor of 12 chars on substring guard so
+  // "add login" doesn't dedupe against "add login button to settings".
+  const norm = normalizeActionText(t);
+  if (!norm) return;
+  const exists = actions.some(x => {
+    const xn = normalizeActionText(x.summary);
+    if (!xn) return false;
+    if (xn === norm) return true;
+    if (norm.length >= 12 && xn.length >= 12 && (xn.includes(norm) || norm.includes(xn))) return true;
+    return false;
+  });
+  if (exists) return;
+  actions.unshift({
+    id: Date.now() + Math.random(),
+    ts: Date.now(),
+    source,
+    sourceName,
+    summary: t,
+    urgency: urgency || 'medium',
+    status: 'todo',
+  });
+  saveActions(actions);
+  renderActions();
+}
+
+actionsClearDone.addEventListener('click', (e) => {
+  e.preventDefault();
+  const next = loadActions().filter(a => a.status !== 'done');
+  saveActions(next);
+  renderActions();
+});
+
+if (actionsSortToggle) {
+  actionsSortToggle.textContent = `sort: ${getActionsSort()}`;
+  actionsSortToggle.addEventListener('click', (e) => {
+    e.preventDefault();
+    setActionsSort(getActionsSort() === 'priority' ? 'newest' : 'priority');
+    renderActions();
+  });
+}
+
+// Tab switching.
+document.querySelectorAll('.bs-tab').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.bs-tab').forEach(b => b.classList.toggle('active', b === btn));
+    const tab = btn.dataset.tab;
+    document.getElementById('bs-pane-notes').style.display = tab === 'notes' ? 'flex' : 'none';
+    document.getElementById('bs-pane-actions').style.display = tab === 'actions' ? 'flex' : 'none';
+    document.getElementById('bs-pane-alerts').style.display = tab === 'alerts' ? 'flex' : 'none';
+  });
+});
+
+// Update notes-tab count when renderNotes runs.
+const _origRenderNotes = renderNotes;
+renderNotes = function() {
+  _origRenderNotes();
+  bsCountNotes.textContent = loadNotes().length;
+};
+// One-shot cleanup of existing duplicates in localStorage. Keeps the oldest
+// entry per cluster, preserves 'done' if any duplicate had it.
+(function cleanupDuplicateActions() {
+  const actions = loadActions();
+  if (actions.length < 2) return;
+  const sorted = [...actions].sort((a, b) => (a.ts || 0) - (b.ts || 0));
+  const kept = [];
+  let removed = 0;
+  for (const a of sorted) {
+    const norm = normalizeActionText(a.summary);
+    if (!norm) { kept.push(a); continue; }
+    const dup = kept.find(k => {
+      const kn = normalizeActionText(k.summary);
+      if (!kn) return false;
+      if (kn === norm) return true;
+      if (norm.length >= 12 && kn.length >= 12 && (kn.includes(norm) || norm.includes(kn))) return true;
+      return false;
+    });
+    if (dup) {
+      if (a.status === 'done' && dup.status !== 'done') dup.status = 'done';
+      removed++;
+    } else {
+      kept.push(a);
+    }
+  }
+  if (removed > 0) {
+    kept.sort((a, b) => (b.ts || 0) - (a.ts || 0));
+    saveActions(kept);
+    console.log(`[actions] cleaned up ${removed} duplicate${removed === 1 ? '' : 's'}`);
+  }
+})();
+
+renderActions();
+bsCountNotes.textContent = loadNotes().length;
+
+// ----- ALERTS tab -----
+// Reads from the SQLite alerts table populated by main-process pollers.
+// Each alert: severity, source (github/sentry/supabase/asc), title, body,
+// optional file_hint + persona_id, link out to the source.
+
+const alertsListEl = document.getElementById('alerts-list');
+const bsCountAlerts = document.getElementById('bs-count-alerts');
+const alertsConfigStatus = document.getElementById('alerts-config-status');
+const alertsPollNow = document.getElementById('alerts-poll-now');
+let alertCache = [];
+
+const SOURCE_BADGE = {
+  github:   { label: 'GH', bg: '#1f2a37', fg: '#e2e8f0' },
+  sentry:   { label: 'SY', bg: '#3b1d4f', fg: '#e9d5ff' },
+  supabase: { label: 'SB', bg: '#0c4a3a', fg: '#a7f3d0' },
+  asc:      { label: 'AC', bg: '#1e3a5f', fg: '#bfdbfe' },
+};
+const SEVERITY_COLOR = {
+  red:    '#f87171',
+  amber:  '#fbbf24',
+  yellow: '#facc15',
+  info:   '#94a3b8',
+};
+
+async function refreshAlerts() {
+  try {
+    const res = await window.hive.listAlerts('open');
+    if (res && res.ok) {
+      alertCache = res.alerts || [];
+      renderAlerts();
+    }
+  } catch { /* fine */ }
+}
+
+function renderAlerts() {
+  bsCountAlerts.textContent = alertCache.length;
+  if (alertCache.length === 0) {
+    alertsListEl.innerHTML = '<div class="brainstorm-empty">No alerts. Connected sources will populate as bugs land.</div>';
+    return;
+  }
+  alertsListEl.innerHTML = alertCache.map(a => {
+    const sev = SEVERITY_COLOR[a.severity] || SEVERITY_COLOR.info;
+    const src = SOURCE_BADGE[a.source] || { label: a.source.toUpperCase().slice(0,2), bg: 'var(--panel-2)', fg: 'var(--muted)' };
+    const personaColor = a.persona_id ? (PERSONA_COLOR[a.persona_id] || 'var(--accent)') : 'var(--muted)';
+    const persona = a.persona_id ? advisorList.find(x => x.id === a.persona_id) : null;
+    const personaName = persona ? persona.name : (a.persona_id ? a.persona_id : null);
+    const fileLine = a.file_hint
+      ? `<div style="font-size:9px;color:var(--muted);">📎 ${escapeHtml(a.file_hint)}</div>`
+      : '';
+    const personaPill = personaName
+      ? `<span style="font-size:9px;background:var(--panel-2);color:${personaColor};padding:1px 6px;border-radius:8px;border:1px solid ${personaColor};">${escapeHtml(personaName)}</span>`
+      : '';
+    const bodyHtml = a.body
+      ? `<div class="alert-body" style="font-size:10px;color:var(--muted);max-height:3em;overflow:hidden;line-height:1.4;white-space:pre-wrap;">${escapeHtml(a.body.slice(0, 300))}${a.body.length > 300 ? '…' : ''}</div>`
+      : '';
+    const askBtn = persona
+      ? `<a href="#" class="alert-ask" data-id="${a.id}" data-persona="${a.persona_id}" data-context="${encodeURIComponent('I just got an alert in your domain:\n\nTITLE: ' + a.title + '\n\nBODY: ' + (a.body || '(no body)'))}" style="color:var(--accent);text-decoration:none;font-size:9px;">ask ${escapeHtml(personaName)}</a>`
+      : '';
+    const linkBtn = a.url
+      ? `<a href="${escapeHtml(a.url)}" target="_blank" style="color:var(--muted);text-decoration:none;font-size:9px;">open ↗</a>`
+      : '';
+    return `
+      <div class="brainstorm-note" style="--note-color:${sev};" data-id="${a.id}">
+        <div class="note-meta" style="display:flex;justify-content:space-between;align-items:center;gap:6px;">
+          <div style="display:flex;align-items:center;gap:6px;">
+            <span style="background:${src.bg};color:${src.fg};font-size:8px;font-weight:700;padding:1px 5px;border-radius:3px;letter-spacing:0.5px;">${src.label}</span>
+            <span style="color:${sev};font-size:9px;font-weight:700;letter-spacing:0.5px;">${(a.severity || 'info').toUpperCase()}</span>
+            ${personaPill}
+          </div>
+          <span style="font-size:9px;">${fmtTs(a.ts)}</span>
+        </div>
+        <div style="font-size:11px;line-height:1.4;color:var(--text);font-weight:500;word-break:break-word;">${escapeHtml(a.title)}</div>
+        ${fileLine}
+        ${bodyHtml}
+        <div class="note-actions">
+          ${askBtn}
+          ${linkBtn}
+          <a href="#" class="alert-ack" data-id="${a.id}" style="color:var(--muted);">ack</a>
+          <a href="#" class="alert-delete" data-id="${a.id}" style="color:var(--error);">delete</a>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  alertsListEl.querySelectorAll('.alert-ack').forEach(a => {
+    a.addEventListener('click', async (e) => {
+      e.preventDefault();
+      await window.hive.ackAlert(Number(a.dataset.id));
+      refreshAlerts();
+    });
+  });
+  alertsListEl.querySelectorAll('.alert-delete').forEach(a => {
+    a.addEventListener('click', async (e) => {
+      e.preventDefault();
+      await window.hive.deleteAlert(Number(a.dataset.id));
+      refreshAlerts();
+    });
+  });
+  alertsListEl.querySelectorAll('.alert-ask').forEach(a => {
+    a.addEventListener('click', async (e) => {
+      e.preventDefault();
+      const personaId = a.dataset.persona;
+      const context = decodeURIComponent(a.dataset.context || '');
+      // Open the advisor modal pre-loaded with the alert as the user message.
+      advisorsModal.style.display = 'flex';
+      selectAdvisor(personaId);
+      advisorInput.value = context + '\n\nWhat does this mean and what should I do?';
+      advisorInput.focus();
+    });
+  });
+}
+
+async function refreshAlertsConfig() {
+  try {
+    const cfg = await window.hive.alertsConfig();
+    if (!cfg) { alertsConfigStatus.textContent = 'config unavailable'; return; }
+    const sources = [];
+    if (cfg.github) sources.push('GH');
+    if (cfg.sentry) sources.push('Sentry');
+    if (cfg.supabase) sources.push('Supabase');
+    if (cfg.asc) sources.push('ASC');
+    alertsConfigStatus.textContent = sources.length
+      ? `Sources: ${sources.join(' · ')}`
+      : 'No sources wired — set GITHUB_TOKEN / SENTRY_AUTH_TOKEN in .env';
+  } catch { alertsConfigStatus.textContent = ''; }
+}
+
+alertsPollNow.addEventListener('click', async (e) => {
+  e.preventDefault();
+  alertsPollNow.textContent = 'polling…';
+  try {
+    await window.hive.pollAlertsNow();
+    await refreshAlerts();
+  } finally {
+    alertsPollNow.textContent = 'poll now';
+  }
+});
+
+window.hive.onAlertEvent(async (evt) => {
+  if (!evt) return;
+  if (evt.type === 'new-alerts' && evt.count > 0) {
+    await refreshAlerts();
+    // Auto-push high-severity alerts as actions.
+    const highSev = alertCache.filter(a =>
+      a.severity === 'red' && evt.alertIds && evt.alertIds.includes(a.id)
+    );
+    for (const a of highSev) {
+      const persona = a.persona_id ? advisorList.find(x => x.id === a.persona_id) : null;
+      addAction(`Fix ${a.severity.toUpperCase()}: ${a.title.slice(0, 80)}`, 'high', a.persona_id, persona ? persona.name : (a.source || null));
+    }
+    // Visual nudge — flash the ALERTS tab counter.
+    bsCountAlerts.style.transition = 'background 0.4s';
+    bsCountAlerts.style.background = SEVERITY_COLOR.red;
+    setTimeout(() => { bsCountAlerts.style.background = ''; }, 1200);
+  } else if (evt.type === 'poll-result') {
+    // Optional: log poll-source results to alerts-config-status briefly
+    if (evt.result && evt.result.error && !evt.result.error.includes('not set')) {
+      // Surface real errors, but ignore "not set" (just means env var missing).
+      console.warn('[alerts] poll', evt.result.source, evt.result.error);
+    }
+  }
+});
+
+refreshAlertsConfig();
+refreshAlerts();
+
+// Hook: after every advisor reply, fire-and-forget extract actions.
+window.__extractActionsFor = async (personaId, question, reply) => {
+  const persona = advisorList.find(a => a.id === personaId);
+  const personaName = persona ? persona.name : personaId;
+  try {
+    const res = await window.hive.extractActions(question, reply, personaName);
+    if (res && res.ok && Array.isArray(res.actions)) {
+      for (const act of res.actions) {
+        addAction(act.summary, act.urgency, personaId, personaName);
+      }
+    }
+  } catch { /* fire-and-forget */ }
+};
+
+// Expose pinAdvisorReply so the modal chat renderer can call it.
+window.__pinAdvisorReply = (personaId, content) => {
+  const persona = advisorList.find(a => a.id === personaId);
+  addNote(content, personaId, persona ? persona.name : null);
+  // Visual nudge: briefly flash the brainstorm header
+  const head = brainstormEl.querySelector('.brainstorm-head strong');
+  if (head) {
+    const orig = head.style.color;
+    head.style.color = PERSONA_COLOR[personaId] || 'var(--accent)';
+    setTimeout(() => { head.style.color = orig; }, 600);
+  }
+};
+
+// ----- Council mode -----
+const councilModal = document.getElementById('council-modal');
+const councilGrid = document.getElementById('council-grid');
+const councilSynth = document.getElementById('council-synth');
+const councilQuestionEl = document.getElementById('council-question');
+const councilBtn = document.getElementById('council-run');
+let councilRunning = false;
+
+function renderCouncilLoading(question) {
+  councilQuestionEl.textContent = `“${question.length > 80 ? question.slice(0, 80) + '…' : question}”`;
+  councilSynth.innerHTML = '<div style="font-size:12px;color:var(--muted);font-style:italic;">Programme Lead will synthesise once every specialist replies…</div>';
+  // Show all advisor specialists + page agents as pending cards
+  const pending = advisorList.filter(a => !a.isManager);
+  councilGrid.innerHTML = pending.map(p => {
+    const color = PERSONA_COLOR[p.id] || 'var(--accent)';
+    return `<div data-id="${p.id}" style="background:var(--panel-2);border:1px solid var(--border);border-left:3px solid ${color};border-radius:6px;padding:10px 14px;display:flex;flex-direction:column;gap:6px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <strong style="color:${color};font-size:12px;">${escapeHtml(p.name)}</strong>
+        <span style="font-size:9px;color:var(--muted);font-style:italic;">thinking…</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderCouncilFinal(result) {
+  councilQuestionEl.textContent = `“${result.question.length > 80 ? result.question.slice(0, 80) + '…' : result.question}”`;
+  councilSynth.innerHTML = `
+    <div style="font-size:9px;color:var(--manager,#c084fc);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:6px;">⟦ PROGRAMME LEAD SYNTHESIS ⟧</div>
+    <div style="font-size:13px;line-height:1.6;color:var(--text);white-space:pre-wrap;">${escapeHtml(result.synthesis)}</div>
+  `;
+  councilGrid.innerHTML = (result.participants || []).map(p => {
+    const color = PERSONA_COLOR[p.personaId] || 'var(--accent)';
+    const sourcesHtml = (p.sources || []).length
+      ? `<div style="margin-top:6px;font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;">sources</div>` +
+        (p.sources || []).map(s => `<div style="font-size:10px;color:var(--muted);">[${s.index}] ${escapeHtml(s.label)}</div>`).join('')
+      : '';
+    const errorHtml = p.error ? `<div style="color:var(--error);font-size:11px;">error: ${escapeHtml(p.error)}</div>` : '';
+    const replyHtml = p.reply ? `<div style="font-size:11px;line-height:1.55;color:var(--text);white-space:pre-wrap;">${escapeHtml(p.reply)}</div>` : '';
+    return `
+      <div style="background:var(--panel-2);border:1px solid var(--border);border-left:3px solid ${color};border-radius:6px;padding:10px 14px;display:flex;flex-direction:column;gap:6px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <strong style="color:${color};font-size:12px;">${escapeHtml(p.personaName)}</strong>
+          <a href="#" class="council-pin" data-content="${encodeURIComponent(p.reply || '')}" data-id="${p.personaId}" style="color:var(--muted);text-decoration:none;font-size:10px;opacity:0.6;">◎ pin</a>
+        </div>
+        ${errorHtml}
+        ${replyHtml}
+        ${sourcesHtml}
+      </div>
+    `;
+  }).join('');
+  // Wire pin buttons
+  councilGrid.querySelectorAll('.council-pin').forEach(a => {
+    a.addEventListener('click', (e) => {
+      e.preventDefault();
+      const content = decodeURIComponent(a.dataset.content || '');
+      if (content) {
+        window.__pinAdvisorReply(a.dataset.id, content);
+        a.textContent = '✓ pinned';
+        setTimeout(() => a.textContent = '◎ pin', 900);
+      }
+    });
+  });
+}
+
+document.getElementById('close-council').addEventListener('click', (e) => {
+  e.preventDefault();
+  councilModal.style.display = 'none';
+});
+councilModal.addEventListener('click', (e) => {
+  if (e.target === councilModal) councilModal.style.display = 'none';
+});
+
+councilBtn.addEventListener('click', async () => {
+  if (councilRunning) return;
+  const question = taskInput.value.trim();
+  if (!question) {
+    taskInput.focus();
+    taskInput.placeholder = 'type a question first, then Council fans it to every specialist';
+    setTimeout(() => taskInput.placeholder = 'Ask the Programme Lead, or hit Council to fan out to every specialist', 2200);
+    return;
+  }
+  councilRunning = true;
+  councilBtn.disabled = true;
+  councilBtn.style.opacity = '0.5';
+  councilModal.style.display = 'flex';
+  renderCouncilLoading(question);
+  try {
+    const res = await window.hive.runCouncil(question);
+    if (res && res.ok) {
+      renderCouncilFinal(res);
+      taskInput.value = '';
+      // Extract actions from each agent's reply + the synthesis. Each
+      // extraction is its own Haiku call but they fire in parallel and the
+      // user doesn't wait for them — actions arrive a second or two later.
+      for (const p of (res.participants || [])) {
+        if (p.reply && p.reply.trim().length > 60) {
+          window.__extractActionsFor(p.personaId, question, p.reply);
+        }
+      }
+      if (res.synthesis && res.synthesis.trim().length > 60) {
+        window.__extractActionsFor('fxv:manager', question, res.synthesis);
+      }
+    } else {
+      councilSynth.innerHTML = `<div style="color:var(--error);font-size:12px;">Council failed: ${escapeHtml((res && res.error) || 'unknown')}</div>`;
+    }
+  } catch (err) {
+    councilSynth.innerHTML = `<div style="color:var(--error);font-size:12px;">Council failed: ${escapeHtml(err.message || String(err))}</div>`;
+  } finally {
+    councilRunning = false;
+    councilBtn.disabled = false;
+    councilBtn.style.opacity = '';
+  }
+});
+
+// ----- Ship-readiness audit -----
+const shipAuditModal = document.getElementById('ship-audit-modal');
+const shipAuditGrid = document.getElementById('ship-audit-grid');
+const shipAuditStatus = document.getElementById('ship-audit-status');
+const shipAuditRunBtn = document.getElementById('ship-audit-run');
+const shipAuditOverall = document.getElementById('ship-audit-overall');
+let shipAuditRunning = false;
+const shipAuditState = new Map(); // personaId -> {status, blockers, mitigations, sources}
+
+const STATUS_COLORS = {
+  red:    { bg: 'rgba(248,113,113,0.18)', fg: '#fca5a5' },
+  amber:  { bg: 'rgba(251,191,36,0.18)',  fg: '#fcd34d' },
+  green:  { bg: 'rgba(74,222,128,0.18)',  fg: '#86efac' },
+  unknown:{ bg: 'rgba(107,124,146,0.15)', fg: '#94a3b8' },
+};
+
+function renderShipAuditGrid() {
+  const cards = Array.from(shipAuditState.entries()).map(([personaId, r]) => {
+    const persona = advisorList.find(a => a.id === personaId);
+    const personaColor = PERSONA_COLOR[personaId] || 'var(--accent)';
+    const sc = STATUS_COLORS[r.status] || STATUS_COLORS.unknown;
+    const statusLabel = r.status === 'unknown' ? '...' : r.status.toUpperCase();
+    const blockers = (r.blockers || []).map(b => `<li>${escapeHtml(b)}</li>`).join('');
+    const mits = (r.mitigations || []).map(b => `<li>${escapeHtml(b)}</li>`).join('');
+    const errMsg = r.error ? `<div style="color:var(--error);font-size:10px;">error: ${escapeHtml(r.error)}</div>` : '';
+    return `
+      <div style="background:var(--panel-2);border:1px solid var(--border);border-left:3px solid ${personaColor};border-radius:6px;padding:12px 14px;display:flex;flex-direction:column;gap:8px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <strong style="color:${personaColor};font-size:12px;letter-spacing:0.5px;">${escapeHtml(persona ? persona.name : personaId)}</strong>
+          <span style="background:${sc.bg};color:${sc.fg};font-size:9px;letter-spacing:1px;padding:3px 9px;border-radius:10px;font-weight:700;">${statusLabel}</span>
+        </div>
+        ${errMsg}
+        ${blockers ? `<div><div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:3px;">blockers</div><ul style="margin:0;padding-left:18px;font-size:11px;line-height:1.5;color:var(--text);">${blockers}</ul></div>` : ''}
+        ${mits ? `<div><div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:3px;">mitigations</div><ul style="margin:0;padding-left:18px;font-size:11px;line-height:1.5;color:var(--text);">${mits}</ul></div>` : ''}
+      </div>
+    `;
+  }).join('');
+  shipAuditGrid.innerHTML = cards || '<div style="color:var(--muted);font-size:11px;padding:20px;text-align:center;">Run an audit to populate.</div>';
+}
+
+function setShipOverall(status) {
+  if (!status) { shipAuditOverall.style.display = 'none'; return; }
+  const sc = STATUS_COLORS[status] || STATUS_COLORS.unknown;
+  shipAuditOverall.style.background = sc.bg;
+  shipAuditOverall.style.color = sc.fg;
+  shipAuditOverall.style.fontWeight = '700';
+  shipAuditOverall.textContent = `OVERALL: ${status.toUpperCase()}`;
+  shipAuditOverall.style.display = 'inline-block';
+}
+
+document.getElementById('open-ship-audit').addEventListener('click', (e) => {
+  e.preventDefault();
+  shipAuditModal.style.display = 'flex';
+  if (shipAuditState.size === 0) {
+    shipAuditGrid.innerHTML = '<div style="color:var(--muted);font-size:11px;padding:20px;text-align:center;">Click RUN AUDIT to scan every agent. ~30-60s, ~£0.05.</div>';
+  }
+});
+document.getElementById('close-ship-audit').addEventListener('click', (e) => {
+  e.preventDefault();
+  shipAuditModal.style.display = 'none';
+});
+shipAuditModal.addEventListener('click', (e) => {
+  if (e.target === shipAuditModal) shipAuditModal.style.display = 'none';
+});
+
+window.hive.onShipAuditProgress((evt) => {
+  if (!evt) return;
+  if (evt.type === 'start') {
+    shipAuditState.clear();
+    setShipOverall(null);
+    shipAuditStatus.textContent = `Auditing 0 / ${evt.total ?? '?'} agents...`;
+    renderShipAuditGrid();
+    return;
+  }
+  if (evt.type === 'agent-done' && evt.report) {
+    shipAuditState.set(evt.report.personaId, evt.report);
+    const done = shipAuditState.size;
+    shipAuditStatus.textContent = `Auditing ${done} / ${shipAuditState.size + (evt.total ? evt.total - done : 0)} agents... (${evt.report.personaName} done)`;
+    renderShipAuditGrid();
+  }
+});
+
+shipAuditRunBtn.addEventListener('click', async () => {
+  if (shipAuditRunning) return;
+  shipAuditRunning = true;
+  shipAuditState.clear();
+  shipAuditRunBtn.disabled = true;
+  shipAuditRunBtn.style.opacity = '0.5';
+  shipAuditRunBtn.textContent = 'RUNNING...';
+  shipAuditStatus.textContent = 'Asking every agent to audit their domain...';
+  setShipOverall(null);
+  renderShipAuditGrid();
+  try {
+    const res = await window.hive.runShipAudit();
+    if (res && res.ok) {
+      // Merge final reports (in case any progress events were missed).
+      for (const r of (res.reports || [])) shipAuditState.set(r.personaId, r);
+      setShipOverall(res.overall);
+      const counts = { red: 0, amber: 0, green: 0, unknown: 0 };
+      for (const r of (res.reports || [])) counts[r.status] = (counts[r.status] || 0) + 1;
+      shipAuditStatus.textContent = `Done. ${counts.red} red · ${counts.amber} amber · ${counts.green} green${counts.unknown ? ' · ' + counts.unknown + ' unknown' : ''}`;
+      renderShipAuditGrid();
+    } else {
+      shipAuditStatus.textContent = `Audit failed: ${(res && res.error) || 'unknown'}`;
+    }
+  } catch (err) {
+    shipAuditStatus.textContent = `Audit failed: ${err.message || err}`;
+  } finally {
+    shipAuditRunning = false;
+    shipAuditRunBtn.disabled = false;
+    shipAuditRunBtn.style.opacity = '';
+    shipAuditRunBtn.textContent = 'RUN AGAIN';
+  }
+});
+
+// ----- Refresh memory button -----
+const refreshLink = document.getElementById('refresh-seeds');
+const refreshToast = document.getElementById('refresh-toast');
+const refreshLog = document.getElementById('refresh-log');
+const refreshClose = document.getElementById('refresh-close');
+let refreshing = false;
+
+window.hive.onRefreshSeedsLog((line) => {
+  refreshLog.textContent += line + '\n';
+  refreshLog.scrollTop = refreshLog.scrollHeight;
+});
+refreshClose.addEventListener('click', (e) => { e.preventDefault(); refreshToast.style.display = 'none'; });
+refreshLink.addEventListener('click', async (e) => {
+  e.preventDefault();
+  if (refreshing) return;
+  refreshing = true;
+  refreshLog.textContent = '';
+  refreshToast.style.display = 'block';
+  refreshClose.style.display = 'none';
+  refreshLink.style.opacity = '0.5';
+  refreshLink.textContent = '↻ refreshing…';
+  try {
+    const res = await window.hive.refreshSeeds();
+    if (res && res.ok) {
+      const lines = [
+        `[done] ${res.totalFiles} files, ${res.totalChunks} chunks`,
+        '',
+        ...res.perAgent.map(a => `  ${a.id.padEnd(22)}  ${String(a.files).padStart(3)}f  ${String(a.chunks).padStart(4)}c`),
+      ];
+      refreshLog.textContent += lines.join('\n');
+      // Re-paint the grid since chunk counts may have changed.
+      await loadAdvisors();
+    } else {
+      refreshLog.textContent += `\n[error] ${(res && res.error) || 'unknown'}`;
+    }
+  } catch (err) {
+    refreshLog.textContent += `\n[error] ${err.message || err}`;
+  } finally {
+    refreshing = false;
+    refreshLink.style.opacity = '';
+    refreshLink.textContent = '↻ refresh memory';
+    refreshClose.style.display = 'inline';
+  }
+});
+
+// In FXV advise mode, the top input talks to the Programme Lead instead of
+// dispatching to workers. We override window.hive.runTask so the existing
+// runTask() handler keeps working (input clear, runtime clock, etc.) but
+// the actual call routes to consultAdvisor.
+if (document.body.classList.contains('mode-fxv-advise')) {
+  const _origRunTaskAdvise = window.hive.runTask;
+  window.hive.runTask = async (task, _imageDataUrl) => {
+    const personaId = 'fxv:manager';
+    // Open the modal so the user sees the conversation, then push the turn.
+    advisorsModal.style.display = 'flex';
+    if (advisorList.length === 0) await loadAdvisors();
+    selectAdvisor(personaId);
+    const hist = advisorHistories.get(personaId) ?? [];
+    hist.push({ role: 'user', content: task });
+    advisorHistories.set(personaId, hist);
+    renderAdvisorChat();
+
+    const thinking = document.createElement('div');
+    thinking.style.cssText = 'align-self:flex-start;color:var(--muted);font-size:11px;font-style:italic;';
+    thinking.textContent = 'Programme Lead is thinking…';
+    advisorChat.appendChild(thinking);
+    advisorChat.scrollTop = advisorChat.scrollHeight;
+
+    try {
+      const res = await window.hive.consultAdvisor(personaId, task, hist.slice(0, -1));
+      thinking.remove();
+      if (res && res.ok) {
+        hist.push({
+          role: 'assistant',
+          content: res.reply,
+          sources: res.sources,
+          citationMissingCount: res.citationMissingCount,
+        });
+        updateCellAfterReply(personaId, res.reply);
+        window.__extractActionsFor(personaId, task, res.reply);
+      } else {
+        hist.push({ role: 'assistant', content: `(error: ${(res && res.error) || 'unknown'})`, sources: [], citationMissingCount: 0 });
+      }
+      advisorHistories.set(personaId, hist);
+      renderAdvisorChat();
+      return { ok: true };
+    } catch (err) {
+      thinking.remove();
+      return { ok: false, error: err.message || String(err) };
+    }
+  };
+}
+document.getElementById('close-advisors').addEventListener('click', (e) => {
+  e.preventDefault();
+  advisorsModal.style.display = 'none';
+});
+// Click on the dimmed backdrop (anywhere outside the inner panel) closes
+// the modal. The inner panel is the modal's first element child.
+advisorsModal.addEventListener('click', (e) => {
+  if (e.target === advisorsModal) advisorsModal.style.display = 'none';
+});
+// Esc closes too.
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && advisorsModal.style.display === 'flex') {
+    advisorsModal.style.display = 'none';
+  }
+});
+advisorSend.addEventListener('click', sendAdvisorMessage);
+advisorInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+    e.preventDefault();
+    sendAdvisorMessage();
+  }
 });

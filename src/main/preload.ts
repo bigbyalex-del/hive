@@ -41,6 +41,20 @@ const IPC = {
   BabysitStop: 'hive:babysit-stop',
   BabysitStatus: 'hive:babysit-status',
   BabysitLog: 'hive:babysit-log',
+  ListAdvisors: 'hive:list-advisors',
+  ConsultAdvisor: 'hive:consult-advisor',
+  RefreshSeeds: 'hive:refresh-seeds',
+  RefreshSeedsLog: 'hive:refresh-seeds-log',
+  ExtractActions: 'hive:extract-actions',
+  RunCouncil: 'hive:run-council',
+  RunShipAudit: 'hive:run-ship-audit',
+  ShipAuditProgress: 'hive:ship-audit-progress',
+  ListAlerts: 'hive:list-alerts',
+  AckAlert: 'hive:ack-alert',
+  DeleteAlert: 'hive:delete-alert',
+  PollAlertsNow: 'hive:poll-alerts-now',
+  AlertsConfig: 'hive:alerts-config',
+  AlertEvent: 'hive:alert-event',
 };
 
 contextBridge.exposeInMainWorld('hive', {
@@ -88,6 +102,34 @@ contextBridge.exposeInMainWorld('hive', {
   babysitStart: (cfg: any) => ipcRenderer.invoke(IPC.BabysitStart, cfg),
   babysitStop: () => ipcRenderer.invoke(IPC.BabysitStop),
   babysitStatus: () => ipcRenderer.invoke(IPC.BabysitStatus),
+  listAdvisors: () => ipcRenderer.invoke(IPC.ListAdvisors),
+  consultAdvisor: (personaId: string, question: string, history?: { role: 'user' | 'assistant'; content: string }[]) =>
+    ipcRenderer.invoke(IPC.ConsultAdvisor, { personaId, question, history: history ?? [] }),
+  refreshSeeds: () => ipcRenderer.invoke(IPC.RefreshSeeds),
+  onRefreshSeedsLog: (cb: (line: string) => void) => {
+    const listener = (_: Electron.IpcRendererEvent, line: string) => cb(line);
+    ipcRenderer.on(IPC.RefreshSeedsLog, listener);
+    return () => ipcRenderer.removeListener(IPC.RefreshSeedsLog, listener);
+  },
+  extractActions: (question: string, reply: string, personaName: string) =>
+    ipcRenderer.invoke(IPC.ExtractActions, { question, reply, personaName }),
+  runCouncil: (question: string) => ipcRenderer.invoke(IPC.RunCouncil, question),
+  runShipAudit: () => ipcRenderer.invoke(IPC.RunShipAudit),
+  onShipAuditProgress: (cb: (evt: any) => void) => {
+    const listener = (_: Electron.IpcRendererEvent, evt: any) => cb(evt);
+    ipcRenderer.on(IPC.ShipAuditProgress, listener);
+    return () => ipcRenderer.removeListener(IPC.ShipAuditProgress, listener);
+  },
+  listAlerts: (status?: string) => ipcRenderer.invoke(IPC.ListAlerts, status ?? 'open'),
+  ackAlert: (id: number) => ipcRenderer.invoke(IPC.AckAlert, id),
+  deleteAlert: (id: number) => ipcRenderer.invoke(IPC.DeleteAlert, id),
+  pollAlertsNow: () => ipcRenderer.invoke(IPC.PollAlertsNow),
+  alertsConfig: () => ipcRenderer.invoke(IPC.AlertsConfig),
+  onAlertEvent: (cb: (evt: any) => void) => {
+    const listener = (_: Electron.IpcRendererEvent, evt: any) => cb(evt);
+    ipcRenderer.on(IPC.AlertEvent, listener);
+    return () => ipcRenderer.removeListener(IPC.AlertEvent, listener);
+  },
   onBabysitLog: (cb: (line: string) => void) => {
     const listener = (_: Electron.IpcRendererEvent, line: string) => cb(line);
     ipcRenderer.on(IPC.BabysitLog, listener);

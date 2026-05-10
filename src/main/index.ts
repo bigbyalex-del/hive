@@ -16,6 +16,10 @@ import { listProjects, createProject, getProject, getActiveProjectId, setActiveP
 import { costGBP } from './pricing';
 import { diffWorkerBranch } from './projectRepo';
 import { babysitStart, babysitStop, babysitStatus } from './babysit';
+import { listAdvisors, consultAdvisor, extractActions, runCouncil, runShipAudit } from './advisors';
+import { runSeed } from '../scripts/seed-fxv-personas';
+import { startAlertsPolling, stopAlertsPolling, pollAllOnce, alertsConfig } from './alerts';
+import { listAlerts as dbListAlerts, setAlertStatus, deleteAlertRow } from './db';
 
 dotenv.config({ path: path.join(__dirname, '..', '..', '.env') });
 
@@ -373,6 +377,89 @@ app.whenReady().then(async () => {
   ipcMain.handle(IPC.BabysitStop, () => babysitStop());
   ipcMain.handle(IPC.BabysitStatus, () => babysitStatus());
 
+  ipcMain.handle(IPC.ListAdvisors, () => {
+    try {
+      return { ok: true, advisors: listAdvisors() };
+    } catch (err: any) {
+      return { ok: false, error: err?.message ?? String(err) };
+    }
+  });
+  ipcMain.handle(IPC.ConsultAdvisor, async (_e, payload: { personaId: string; question: string; history: { role: 'user' | 'assistant'; content: string }[] }) => {
+    try {
+      const result = await consultAdvisor(payload.personaId, payload.question, payload.history ?? []);
+      return { ok: true, ...result };
+    } catch (err: any) {
+      return { ok: false, error: err?.message ?? String(err) };
+    }
+  });
+
+  ipcMain.handle(IPC.RefreshSeeds, async () => {
+    try {
+      const result = await runSeed(line => mainWindow?.webContents.send(IPC.RefreshSeedsLog, line));
+      return result;
+    } catch (err: any) {
+      return { ok: false, error: err?.message ?? String(err), totalChunks: 0, totalFiles: 0, perAgent: [] };
+    }
+  });
+
+  ipcMain.handle(IPC.ExtractActions, async (_e, payload: { question: string; reply: string; personaName: string }) => {
+    try {
+      const actions = await extractActions(payload.question, payload.reply, payload.personaName);
+      return { ok: true, actions };
+    } catch (err: any) {
+      return { ok: false, error: err?.message ?? String(err), actions: [] };
+    }
+  });
+
+  ipcMain.handle(IPC.RunCouncil, async (_e, question: string) => {
+    try {
+      const result = await runCouncil(question);
+      return { ok: true, ...result };
+    } catch (err: any) {
+      return { ok: false, error: err?.message ?? String(err) };
+    }
+  });
+
+  ipcMain.handle(IPC.RunShipAudit, async () => {
+    try {
+      const result = await runShipAudit(evt => mainWindow?.webContents.send(IPC.ShipAuditProgress, evt));
+      return { ok: true, ...result };
+    } catch (err: any) {
+      return { ok: false, error: err?.message ?? String(err) };
+    }
+  });
+
+  ipcMain.handle(IPC.ListAlerts, (_e, status: string) => {
+    try {
+      const alerts = dbListAlerts({ status: (status as any) ?? 'open', limit: 200 });
+      return { ok: true, alerts };
+    } catch (err: any) {
+      return { ok: false, error: err?.message ?? String(err), alerts: [] };
+    }
+  });
+  ipcMain.handle(IPC.AckAlert, (_e, id: number) => {
+    try { setAlertStatus(id, 'acked'); return { ok: true }; }
+    catch (err: any) { return { ok: false, error: err?.message ?? String(err) }; }
+  });
+  ipcMain.handle(IPC.DeleteAlert, (_e, id: number) => {
+    try { deleteAlertRow(id); return { ok: true }; }
+    catch (err: any) { return { ok: false, error: err?.message ?? String(err) }; }
+  });
+  ipcMain.handle(IPC.PollAlertsNow, async () => {
+    try {
+      const results = await pollAllOnce(evt => mainWindow?.webContents.send(IPC.AlertEvent, evt));
+      return { ok: true, results };
+    } catch (err: any) {
+      return { ok: false, error: err?.message ?? String(err) };
+    }
+  });
+  ipcMain.handle(IPC.AlertsConfig, () => alertsConfig());
+
+  // Kick off background polling. 10 min interval; first poll fires
+  // immediately so the user sees alerts on launch if any sources are wired.
+  const ALERT_POLL_MS = Number(process.env.HIVE_ALERTS_INTERVAL_MS) || 10 * 60 * 1000;
+  startAlertsPolling(ALERT_POLL_MS, evt => mainWindow?.webContents.send(IPC.AlertEvent, evt));
+
   ipcMain.handle(IPC.GetWorkerDiff, async (_e, workerId: string) => {
     try {
       const result = await diffWorkerBranch(workerId);
@@ -439,6 +526,7 @@ app.whenReady().then(async () => {
 
 app.on('window-all-closed', () => {
   globalShortcut.unregisterAll();
+  stopAlertsPolling();
   orchestrator?.shutdown();
   shutdownAllMcp().catch(() => { /* ignore */ });
   shutdownDb();

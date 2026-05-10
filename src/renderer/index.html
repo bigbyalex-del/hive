@@ -5,35 +5,38 @@
   <title>Hive</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
-<body>
+<body class="mode-fxv-advise">
 
   <div class="titlebar">
     <div class="brand">
-      ◇ HIVE
-      <span class="project-picker" id="project-picker">
+      ◈ FXV ADVISORS
+      <span class="project-picker mode-build-only" id="project-picker">
         <span class="project-picker-name" id="project-picker-name">—</span>
         <span class="project-picker-caret">▾</span>
       </span>
-      <span style="color:var(--muted);font-weight:400;">— multi-agent dashboard</span>
+      <span style="color:var(--muted);font-weight:400;">— talk to your specialist agents</span>
     </div>
     <div class="meta">
-      task: <b id="meta-task">—</b> &nbsp;·&nbsp;
+      <span class="mode-build-only">task: <b id="meta-task">—</b> &nbsp;·&nbsp;</span>
       runtime <b id="meta-runtime">00:00</b> &nbsp;·&nbsp;
       tokens <b id="meta-tokens">0</b>
       &nbsp;·&nbsp;
-      <span title="Spend on this run / today / this project — Click for breakdown" id="meta-cost-wrap" style="cursor:pointer;">£<b id="meta-cost">0.00</b></span>
+      <span title="Spend on this run / today — click for breakdown" id="meta-cost-wrap" style="cursor:pointer;">£<b id="meta-cost">0.00</b></span>
       &nbsp;·&nbsp;
-      <select id="project-type" title="Project type — drives preview chrome and worker hints" style="background:var(--panel);border:1px solid var(--border-strong);color:var(--text);font-family:inherit;padding:3px 6px;border-radius:3px;font-size:11px;margin-right:10px;">
-        <option value="web">🌐 web</option>
-        <option value="ios">📱 iOS</option>
-        <option value="api">⚙ api</option>
+      <select id="project-type" class="mode-build-only" style="background:var(--panel);border:1px solid var(--border-strong);color:var(--text);font-family:inherit;padding:3px 6px;border-radius:3px;font-size:11px;margin-right:10px;">
+        <option value="web">web</option>
+        <option value="ios">iOS</option>
+        <option value="api">api</option>
       </select>
-      <span id="theme-toggle" class="theme-toggle" title="Switch dashboard look">
+      <span id="theme-toggle" class="theme-toggle mode-build-only" title="Switch dashboard look">
         <button data-theme="lab" class="active" type="button">LAB</button>
         <button data-theme="premium" type="button">PREMIUM</button>
       </span>
-      <a href="#" id="open-babysit" style="color:var(--accent);text-decoration:none;margin-right:10px;" title="Babysit — autonomous issue→PR loop">◐ babysit</a>
-      <a href="#" id="open-templates" style="color:var(--accent);text-decoration:none;margin-right:10px;">📦 templates</a>
+      <a href="#" id="open-ship-audit" style="color:var(--accent);text-decoration:none;margin-right:10px;" title="Run every specialist + page agent against a ship-blocker checklist. ~£0.05.">⚑ ship audit</a>
+      <a href="#" id="refresh-seeds" style="color:var(--accent);text-decoration:none;margin-right:10px;" title="Re-embed all FXV repo files + curated CLAUDE memory into specialist namespaces. ~30s, $0.005.">↻ refresh memory</a>
+      <a href="#" id="open-advisors" class="mode-build-only" style="color:var(--accent);text-decoration:none;margin-right:10px;" title="FXV advisors — chat with a domain specialist.">◈ advisors</a>
+      <a href="#" id="open-babysit" class="mode-build-only" style="color:var(--accent);text-decoration:none;margin-right:10px;" title="Babysit — autonomous issue→PR loop">◐ babysit</a>
+      <a href="#" id="open-templates" class="mode-build-only" style="color:var(--accent);text-decoration:none;margin-right:10px;">📦 templates</a>
       <a href="#" id="open-settings" style="color:var(--accent);text-decoration:none;">⚙ models</a>
     </div>
   </div>
@@ -101,12 +104,27 @@
   </div>
 
   <div class="taskbar">
-    <input id="task-input" type="text" placeholder='Describe a task — or hold SPACE to talk' />
-    <button id="snap-btn" title="Drag a region to attach. Works globally with Ctrl+Shift+H even when Hive isn't focused.">📸 Snap</button>
-    <button id="watch-btn" title="Watch the screen — latest frame auto-attaches to every task you fire (Ctrl+Shift+W).">👁 Watch</button>
-    <button id="spec-btn" title="Spec Interview — Manager asks 2-4 clarification questions before dispatching, kills off-piste output.">📋 Spec</button>
-    <button id="mic-btn" title="Hold SPACE or click and hold to talk">🎤 Talk</button>
-    <button id="task-run">Run</button>
+    <input id="task-input" type="text" placeholder='Ask the Programme Lead, or hit Council to fan out to every specialist' />
+    <button id="snap-btn" class="mode-build-only" title="Drag a region to attach.">📸 Snap</button>
+    <button id="watch-btn" class="mode-build-only" title="Watch the screen.">👁 Watch</button>
+    <button id="spec-btn" class="mode-build-only" title="Spec Interview.">📋 Spec</button>
+    <button id="mic-btn" class="mode-build-only" title="Hold SPACE to talk">🎤 Talk</button>
+    <button id="council-run" title="Fan to every specialist + page agent in parallel; Programme Lead synthesises consensus + dissent. ~£0.05.">Council</button>
+    <button id="task-run">Ask</button>
+  </div>
+
+  <div id="council-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:10;align-items:center;justify-content:center;">
+    <div style="background:var(--panel);border:1px solid var(--border-strong);border-radius:8px;width:1080px;max-width:96vw;height:88vh;display:flex;flex-direction:column;overflow:hidden;">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-bottom:1px solid var(--border);">
+        <div style="display:flex;align-items:center;gap:14px;">
+          <strong style="color:var(--accent);letter-spacing:1px;">⚖ COUNCIL</strong>
+          <span id="council-question" style="font-size:11px;color:var(--muted);"></span>
+        </div>
+        <a href="#" id="close-council" style="color:var(--muted);text-decoration:none;">✕</a>
+      </div>
+      <div id="council-synth" style="padding:14px 18px;border-bottom:1px solid var(--border);background:rgba(192,132,252,0.05);"></div>
+      <div id="council-grid" style="flex:1;overflow:auto;padding:14px;display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px;align-content:start;"></div>
+    </div>
   </div>
 
   <div id="spec-panel" style="display:none;background:rgba(0,42,58,0.4);border:1px solid var(--border-strong);border-radius:6px;padding:12px;margin-top:6px;">
@@ -121,10 +139,59 @@
   </div>
   <div id="mic-status" style="font-size:11px;color:var(--muted);margin-top:-6px;min-height:14px;"></div>
 
-  <svg id="power-svg" xmlns="http://www.w3.org/2000/svg"></svg>
-  <div class="grid" id="grid"></div>
+  <div id="page-bar" class="page-bar">
+    <div class="page-bar-label">PAGES</div>
+    <div id="page-bar-buttons" class="page-bar-buttons"></div>
+  </div>
 
-  <div id="drawer" class="drawer collapsed">
+  <svg id="power-svg" xmlns="http://www.w3.org/2000/svg"></svg>
+  <div class="workspace" id="workspace">
+    <div class="grid" id="grid"></div>
+    <aside id="brainstorm" class="brainstorm">
+      <div class="brainstorm-head">
+        <strong>BRAINSTORM</strong>
+        <a href="#" id="brainstorm-toggle" title="Collapse / expand sidebar">«</a>
+      </div>
+      <div class="brainstorm-tabs">
+        <button class="bs-tab active" data-tab="notes" type="button">NOTES <span class="bs-tab-count" id="bs-count-notes">0</span></button>
+        <button class="bs-tab" data-tab="actions" type="button">ACTIONS <span class="bs-tab-count" id="bs-count-actions">0</span></button>
+        <button class="bs-tab" data-tab="alerts" type="button">ALERTS <span class="bs-tab-count" id="bs-count-alerts">0</span></button>
+      </div>
+      <div id="bs-pane-notes" class="bs-pane">
+        <div class="brainstorm-input-wrap">
+          <textarea id="brainstorm-input" rows="2" placeholder="Jot a thought, paste a snippet — Cmd/Ctrl+Enter saves"></textarea>
+          <div class="brainstorm-input-row">
+            <span id="brainstorm-count" class="brainstorm-meta">0 notes</span>
+            <button id="brainstorm-add" type="button">Save</button>
+          </div>
+        </div>
+        <div id="brainstorm-list" class="brainstorm-list"></div>
+      </div>
+      <div id="bs-pane-actions" class="bs-pane" style="display:none;">
+        <div class="brainstorm-input-wrap">
+          <div class="brainstorm-input-row" style="justify-content:space-between;">
+            <span class="brainstorm-meta">Auto-extracted from agent replies</span>
+            <span class="brainstorm-meta" style="display:flex;gap:10px;align-items:center;">
+              <a href="#" id="actions-sort-toggle" style="text-decoration:none;color:var(--muted);" title="Toggle sort order">sort: newest</a>
+              <a href="#" id="actions-clear-done" style="text-decoration:none;color:var(--muted);">clear done</a>
+            </span>
+          </div>
+        </div>
+        <div id="actions-list" class="brainstorm-list"></div>
+      </div>
+      <div id="bs-pane-alerts" class="bs-pane" style="display:none;">
+        <div class="brainstorm-input-wrap">
+          <div class="brainstorm-input-row" style="justify-content:space-between;">
+            <span class="brainstorm-meta" id="alerts-config-status">checking…</span>
+            <a href="#" id="alerts-poll-now" class="brainstorm-meta" style="text-decoration:none;color:var(--accent);">poll now</a>
+          </div>
+        </div>
+        <div id="alerts-list" class="brainstorm-list"></div>
+      </div>
+    </aside>
+  </div>
+
+  <div id="drawer" class="drawer collapsed mode-build-only">
     <div class="drawer-tabs">
       <button class="dtab active" data-tab="activity">📋 Activity</button>
       <button class="dtab" data-tab="preview">🌐 Preview</button>
@@ -176,6 +243,51 @@
       </div>
       <div id="cost-rows" style="display:grid;grid-template-columns:auto 1fr auto;gap:8px 16px;font-size:12px;"></div>
       <div id="cost-by-model" style="margin-top:18px;font-size:11px;"></div>
+    </div>
+  </div>
+
+  <div id="ship-audit-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:10;align-items:center;justify-content:center;">
+    <div style="background:var(--panel);border:1px solid var(--border-strong);border-radius:8px;width:920px;max-width:96vw;height:82vh;display:flex;flex-direction:column;overflow:hidden;">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-bottom:1px solid var(--border);">
+        <div style="display:flex;align-items:center;gap:14px;">
+          <strong style="color:var(--accent);letter-spacing:1px;">⚑ SHIP-READINESS AUDIT</strong>
+          <span id="ship-audit-overall" style="font-size:11px;letter-spacing:1px;padding:2px 10px;border-radius:10px;display:none;"></span>
+        </div>
+        <div style="display:flex;align-items:center;gap:14px;">
+          <button id="ship-audit-run" type="button" style="background:var(--accent);border:none;color:#00171f;font-weight:700;padding:6px 14px;border-radius:4px;cursor:pointer;font-family:inherit;font-size:11px;letter-spacing:0.5px;">RUN AUDIT</button>
+          <a href="#" id="close-ship-audit" style="color:var(--muted);text-decoration:none;">✕</a>
+        </div>
+      </div>
+      <div id="ship-audit-status" style="padding:6px 18px;font-size:11px;color:var(--muted);border-bottom:1px solid var(--border);min-height:14px;">Click RUN AUDIT to scan every agent's domain for ship-blockers.</div>
+      <div id="ship-audit-grid" style="flex:1;overflow:auto;padding:14px;display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;align-content:start;"></div>
+    </div>
+  </div>
+
+  <div id="refresh-toast" style="display:none;position:fixed;top:60px;right:20px;width:380px;max-height:60vh;background:var(--panel);border:1px solid var(--border-strong);border-radius:6px;padding:12px 14px;z-index:11;font-size:11px;color:var(--text);box-shadow:0 8px 24px rgba(0,0,0,0.4);">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+      <strong style="color:var(--accent);letter-spacing:1px;">↻ REFRESHING MEMORY</strong>
+      <a href="#" id="refresh-close" style="display:none;color:var(--muted);text-decoration:none;font-size:11px;">✕</a>
+    </div>
+    <pre id="refresh-log" style="margin:0;background:var(--panel-2);border:1px solid var(--border);border-radius:4px;padding:6px 8px;font-size:10px;line-height:1.45;max-height:40vh;overflow:auto;white-space:pre-wrap;"></pre>
+  </div>
+
+  <div id="advisors-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:10;align-items:center;justify-content:center;">
+    <div style="background:var(--panel);border:1px solid var(--border-strong);border-radius:8px;padding:0;width:880px;max-width:96vw;height:78vh;display:flex;flex-direction:column;overflow:hidden;">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-bottom:1px solid var(--border);">
+        <strong style="color:var(--accent);letter-spacing:1px;">FXV ADVISORS</strong>
+        <a href="#" id="close-advisors" style="color:var(--muted);text-decoration:none;">✕</a>
+      </div>
+      <div style="display:flex;flex:1;min-height:0;">
+        <div id="advisors-list" style="width:200px;border-right:1px solid var(--border);overflow:auto;padding:8px 0;background:var(--panel-2);"></div>
+        <div style="flex:1;display:flex;flex-direction:column;min-width:0;">
+          <div id="advisor-header" style="padding:10px 16px;border-bottom:1px solid var(--border);font-size:12px;color:var(--muted);min-height:14px;"></div>
+          <div id="advisor-chat" style="flex:1;overflow:auto;padding:14px 18px;display:flex;flex-direction:column;gap:14px;"></div>
+          <div style="border-top:1px solid var(--border);padding:10px 14px;display:flex;gap:8px;align-items:flex-end;background:var(--panel-2);">
+            <textarea id="advisor-input" rows="2" placeholder="Ask the selected advisor..." style="flex:1;background:var(--panel);border:1px solid var(--border-strong);color:var(--text);padding:8px 10px;border-radius:4px;font-family:inherit;font-size:12px;resize:vertical;min-height:38px;max-height:160px;"></textarea>
+            <button id="advisor-send" type="button" style="background:var(--accent);border:none;color:#00171f;font-weight:700;padding:8px 16px;border-radius:4px;cursor:pointer;font-family:inherit;align-self:stretch;">Ask</button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
