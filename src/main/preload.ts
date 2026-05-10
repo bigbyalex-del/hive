@@ -61,6 +61,10 @@ const IPC = {
   RollbackDeploy: 'hive:rollback-deploy',
   ListDeploys: 'hive:list-deploys',
   DeployLog: 'hive:deploy-log',
+  GetPulse: 'hive:get-pulse',
+  MarkPulseSeen: 'hive:mark-pulse-seen',
+  ListPersonaChats: 'hive:list-persona-chats',
+  GetCellPreviews: 'hive:get-cell-previews',
 };
 
 contextBridge.exposeInMainWorld('hive', {
@@ -149,6 +153,10 @@ contextBridge.exposeInMainWorld('hive', {
     ipcRenderer.on(IPC.DeployLog, listener);
     return () => ipcRenderer.removeListener(IPC.DeployLog, listener);
   },
+  getPulse: () => ipcRenderer.invoke(IPC.GetPulse),
+  markPulseSeen: () => ipcRenderer.invoke(IPC.MarkPulseSeen),
+  listPersonaChats: (personaId: string, limit?: number) => ipcRenderer.invoke(IPC.ListPersonaChats, { personaId, limit: limit ?? 100 }),
+  getCellPreviews: (personaIds: string[]) => ipcRenderer.invoke(IPC.GetCellPreviews, personaIds),
   onBabysitLog: (cb: (line: string) => void) => {
     const listener = (_: Electron.IpcRendererEvent, line: string) => cb(line);
     ipcRenderer.on(IPC.BabysitLog, listener);

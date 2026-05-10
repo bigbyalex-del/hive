@@ -21,6 +21,8 @@ import { runSeed } from '../scripts/seed-fxv-personas';
 import { startAlertsPolling, stopAlertsPolling, pollAllOnce, alertsConfig } from './alerts';
 import { listAlerts as dbListAlerts, setAlertStatus, deleteAlertRow, reconcileStuckDeploys } from './db';
 import { extractIntent as deployExtractIntent, preparePlan as deployPreparePlan, executePlan as deployExecutePlan, rollback as deployRollback, deployHistory } from './deploy';
+import { getPulse as pulseGet, markPulseSeen as pulseMarkSeen } from './pulse';
+import { listChatsForPersona, previewByPersona } from './db';
 
 dotenv.config({ path: path.join(__dirname, '..', '..', '.env') });
 
@@ -520,6 +522,30 @@ app.whenReady().then(async () => {
       return { ok: true, deploys: deployHistory(typeof limit === 'number' ? limit : 20) };
     } catch (err: any) {
       return { ok: false, error: err?.message ?? String(err), deploys: [] };
+    }
+  });
+
+  // ---- Pulse + chats ------------------------------------------------
+  ipcMain.handle(IPC.GetPulse, () => {
+    try { return { ok: true, pulse: pulseGet() }; }
+    catch (err: any) { return { ok: false, error: err?.message ?? String(err) }; }
+  });
+  ipcMain.handle(IPC.MarkPulseSeen, () => {
+    try { pulseMarkSeen(); return { ok: true }; }
+    catch (err: any) { return { ok: false, error: err?.message ?? String(err) }; }
+  });
+  ipcMain.handle(IPC.ListPersonaChats, (_e, payload: { personaId: string; limit?: number }) => {
+    try {
+      return { ok: true, chats: listChatsForPersona(payload.personaId, payload.limit ?? 100) };
+    } catch (err: any) {
+      return { ok: false, error: err?.message ?? String(err), chats: [] };
+    }
+  });
+  ipcMain.handle(IPC.GetCellPreviews, (_e, personaIds: string[]) => {
+    try {
+      return { ok: true, previews: previewByPersona(Array.isArray(personaIds) ? personaIds : []) };
+    } catch (err: any) {
+      return { ok: false, error: err?.message ?? String(err), previews: {} };
     }
   });
 

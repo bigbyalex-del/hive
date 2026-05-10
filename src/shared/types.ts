@@ -87,6 +87,10 @@ export const IPC = {
   RollbackDeploy: 'hive:rollback-deploy',
   ListDeploys: 'hive:list-deploys',
   DeployLog: 'hive:deploy-log',
+  GetPulse: 'hive:get-pulse',
+  MarkPulseSeen: 'hive:mark-pulse-seen',
+  ListPersonaChats: 'hive:list-persona-chats',
+  GetCellPreviews: 'hive:get-cell-previews',
 } as const;
 
 export type AgentEvent =
