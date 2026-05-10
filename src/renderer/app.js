@@ -2981,7 +2981,9 @@ async function refreshPulse() {
     pulseQuietEl.style.display = 'flex';
     pulseGreetEl.innerHTML = '';
     pulseSinceEl.textContent = p.lastOpenTs ? `last open: ${fmtAgo(p.msSinceLastOpen)} ago` : 'first open';
-    pulseQuietTextEl.innerHTML = `<strong style="color:var(--text);font-weight:600;">All quiet.</strong> ${escapeHtml(p.changedSummary)}`;
+    // changedSummary already starts with "All quiet" in the quiet path; just strip the prefix to avoid dupe.
+    const tail = p.changedSummary.replace(/^All quiet\s*·?\s*/i, '').trim();
+    pulseQuietTextEl.innerHTML = `<strong style="color:var(--text);font-weight:600;">All quiet.</strong>${tail ? ' ' + escapeHtml(tail) : ' nothing notable since last open.'}`;
   }
 
   // Update live chip

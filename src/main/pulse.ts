@@ -230,16 +230,18 @@ function getResumePulse(): ResumeThreadPulse {
 // ---- Headline + roll-up ------------------------------------------------
 
 function buildChangedSummary(s: PulseSnapshot, lastOpenTs: number | null): { text: string; isNew: boolean } {
-  const since = lastOpenTs;
+  // First open: treat anything we know about as "new" — no prior baseline to
+  // compare against, so the user should see the full picture, not a quiet state.
+  const since = lastOpenTs ?? 0;
   const parts: string[] = [];
   if (s.alerts.newSinceLastOpen > 0) parts.push(`${s.alerts.newSinceLastOpen} new alert${s.alerts.newSinceLastOpen === 1 ? '' : 's'}`);
-  if (s.ship.hasAny && since != null && (s.ship.lastTs ?? 0) > since) {
+  if (s.ship.hasAny && (s.ship.lastTs ?? 0) > since) {
     parts.push(`${s.ship.lastChannel} deploy ${s.ship.lastStatus}`);
   }
-  if (s.appStore.available && s.appStore.stateChangedAt && since != null && s.appStore.stateChangedAt > since) {
+  if (s.appStore.available && s.appStore.stateChangedAt && s.appStore.stateChangedAt > since) {
     parts.push(`Build ${s.appStore.buildNumber} → ${s.appStore.state}`);
   }
-  if (s.resume.hasAny && since != null && (s.resume.ts ?? 0) > since) {
+  if (s.resume.hasAny && (s.resume.ts ?? 0) > since) {
     parts.push(`new advisor reply`);
   }
 

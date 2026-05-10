@@ -1273,9 +1273,9 @@ body.theme-premium .badge { color: var(--honey); }
 }
 .pulse-since {
   font-size: 10px;
-  letter-spacing: 1.3px;
-  text-transform: uppercase;
+  letter-spacing: 0.4px;
   color: var(--muted);
+  font-style: italic;
 }
 .pulse-tiles {
   display: grid;
@@ -1480,6 +1480,12 @@ body.mode-fxv-advise .cell .cell-thread .you {
   margin-bottom: 2px;
 }
 body.mode-fxv-advise .cell .cell-thread .reply { color: var(--text); }
+
+/* Programme Lead grid sizing — wider middle column + taller middle row */
+body.mode-fxv-advise .grid {
+  grid-template-columns: 1fr 1.4fr 1fr;
+  grid-template-rows: 1fr 1.4fr 1fr;
+}
 
 /* Programme Lead — bigger + brand-gradient border */
 body.mode-fxv-advise .cell.advisor-lead {
