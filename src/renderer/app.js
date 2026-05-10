@@ -719,6 +719,50 @@ function buildEnrichedTask(originalTask, questions) {
 }
 
 async function runTask() {
+  // FXV advise mode — route the ask straight to the Programme Lead instead of
+  // dispatching to build-mode workers. We can't override window.hive.runTask
+  // from app.js (contextBridge freezes the object), so the routing has to
+  // live inside this local function.
+  if (document.body.classList.contains('mode-fxv-advise') && !specMode && !specPendingTask) {
+    const task = (taskInput.value || '').trim();
+    if (!task) return;
+    const personaId = 'fxv:manager';
+    if (typeof advisorsModal !== 'undefined' && advisorsModal) advisorsModal.style.display = 'flex';
+    if (typeof advisorList !== 'undefined' && advisorList.length === 0 && typeof loadAdvisors === 'function') {
+      await loadAdvisors();
+    }
+    if (typeof selectAdvisor === 'function') selectAdvisor(personaId);
+    const hist = (typeof advisorHistories !== 'undefined' ? advisorHistories.get(personaId) : null) ?? [];
+    hist.push({ role: 'user', content: task });
+    if (typeof advisorHistories !== 'undefined') advisorHistories.set(personaId, hist);
+    if (typeof renderAdvisorChat === 'function') renderAdvisorChat();
+    taskInput.value = '';
+    micStatus.textContent = '◆ Programme Lead is thinking…';
+    try {
+      const res = await window.hive.consultAdvisor(personaId, task, hist.slice(0, -1));
+      if (res && res.ok) {
+        hist.push({
+          role: 'assistant',
+          content: res.reply,
+          sources: res.sources,
+          citationMissingCount: res.citationMissingCount,
+        });
+        if (typeof updateCellAfterReply === 'function') updateCellAfterReply(personaId, res.reply);
+        if (typeof window.__extractActionsFor === 'function') window.__extractActionsFor(personaId, task, res.reply);
+      } else {
+        hist.push({ role: 'assistant', content: `(error: ${(res && res.error) || 'unknown'})`, sources: [], citationMissingCount: 0 });
+      }
+      if (typeof advisorHistories !== 'undefined') advisorHistories.set(personaId, hist);
+      if (typeof renderAdvisorChat === 'function') renderAdvisorChat();
+    } catch (err) {
+      hist.push({ role: 'assistant', content: `(error: ${err.message || String(err)})`, sources: [], citationMissingCount: 0 });
+      if (typeof renderAdvisorChat === 'function') renderAdvisorChat();
+    } finally {
+      micStatus.textContent = '';
+    }
+    return;
+  }
+
   // Spec mode, second click — collect answers and dispatch enriched task.
   if (specPendingTask && specPanel.style.display === 'block') {
     const enriched = buildEnrichedTask(specPendingTask.task, specPendingTask.questions);
@@ -2351,53 +2395,10 @@ refreshLink.addEventListener('click', async (e) => {
   }
 });
 
-// In FXV advise mode, the top input talks to the Programme Lead instead of
-// dispatching to workers. We override window.hive.runTask so the existing
-// runTask() handler keeps working (input clear, runtime clock, etc.) but
-// the actual call routes to consultAdvisor.
-if (document.body.classList.contains('mode-fxv-advise')) {
-  const _origRunTaskAdvise = window.hive.runTask;
-  window.hive.runTask = async (task, _imageDataUrl) => {
-    const personaId = 'fxv:manager';
-    // Open the modal so the user sees the conversation, then push the turn.
-    advisorsModal.style.display = 'flex';
-    if (advisorList.length === 0) await loadAdvisors();
-    selectAdvisor(personaId);
-    const hist = advisorHistories.get(personaId) ?? [];
-    hist.push({ role: 'user', content: task });
-    advisorHistories.set(personaId, hist);
-    renderAdvisorChat();
-
-    const thinking = document.createElement('div');
-    thinking.style.cssText = 'align-self:flex-start;color:var(--muted);font-size:11px;font-style:italic;';
-    thinking.textContent = 'Programme Lead is thinking…';
-    advisorChat.appendChild(thinking);
-    advisorChat.scrollTop = advisorChat.scrollHeight;
-
-    try {
-      const res = await window.hive.consultAdvisor(personaId, task, hist.slice(0, -1));
-      thinking.remove();
-      if (res && res.ok) {
-        hist.push({
-          role: 'assistant',
-          content: res.reply,
-          sources: res.sources,
-          citationMissingCount: res.citationMissingCount,
-        });
-        updateCellAfterReply(personaId, res.reply);
-        window.__extractActionsFor(personaId, task, res.reply);
-      } else {
-        hist.push({ role: 'assistant', content: `(error: ${(res && res.error) || 'unknown'})`, sources: [], citationMissingCount: 0 });
-      }
-      advisorHistories.set(personaId, hist);
-      renderAdvisorChat();
-      return { ok: true };
-    } catch (err) {
-      thinking.remove();
-      return { ok: false, error: err.message || String(err) };
-    }
-  };
-}
+// (Routing for FXV advise mode lives inside the local runTask() function above.
+// Earlier attempt to override window.hive.runTask via contextBridge silently
+// failed — the bridge freezes the exposed object — so the old override never
+// ran and tasks fell through to the worker orchestrator. Don't add it back.)
 document.getElementById('close-advisors').addEventListener('click', (e) => {
   e.preventDefault();
   advisorsModal.style.display = 'none';
@@ -3021,6 +3022,11 @@ if (pulseExpandLink) pulseExpandLink.addEventListener('click', (e) => {
 
 // Refresh pulse on a 60s loop while in advisor mode + on first paint
 if (document.body.classList.contains('mode-fxv-advise')) {
+  // Belt-and-braces: if a previous session leaked a worker (e.g. the contextBridge
+  // routing bug), cancel anything still running so it stops burning tokens.
+  if (window.hive && typeof window.hive.cancelAll === 'function') {
+    window.hive.cancelAll().catch(() => { /* fine */ });
+  }
   refreshPulse();
   setInterval(refreshPulse, 60_000);
   // Live chip rotates every 8s
