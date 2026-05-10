@@ -81,6 +81,12 @@ export const IPC = {
   PollAlertsNow: 'hive:poll-alerts-now',
   AlertsConfig: 'hive:alerts-config',
   AlertEvent: 'hive:alert-event',
+  ExtractDeployIntent: 'hive:extract-deploy-intent',
+  PrepareDeploy: 'hive:prepare-deploy',
+  ExecuteDeploy: 'hive:execute-deploy',
+  RollbackDeploy: 'hive:rollback-deploy',
+  ListDeploys: 'hive:list-deploys',
+  DeployLog: 'hive:deploy-log',
 } as const;
 
 export type AgentEvent =

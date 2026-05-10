@@ -114,6 +114,23 @@ export async function initDb(): Promise<void> {
     );
     CREATE UNIQUE INDEX IF NOT EXISTS idx_alerts_ext ON alerts(source, external_id);
     CREATE INDEX IF NOT EXISTS idx_alerts_status ON alerts(status);
+
+    CREATE TABLE IF NOT EXISTS deploys (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ts INTEGER NOT NULL,
+      project TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      channel TEXT NOT NULL,
+      sha TEXT,
+      group_id TEXT,
+      prev_group_id TEXT,
+      message TEXT NOT NULL,
+      status TEXT NOT NULL,
+      duration_ms INTEGER,
+      error TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_deploys_ts ON deploys(ts);
+    CREATE INDEX IF NOT EXISTS idx_deploys_channel ON deploys(channel, ts);
   `);
 
   // Lightweight migrations — sql.js doesn't fail on duplicate ALTER, but we
@@ -440,6 +457,156 @@ export function deleteAlertRow(id: number): void {
   stmt.run([id]);
   stmt.free();
   scheduleSave();
+}
+
+// ---- Deploys ----------------------------------------------------------
+//
+// Audit trail of every OTA / build / submit Hive has driven. Status flows
+// new → executing → shipped | failed | cancelled. group_id is the EAS
+// update group (for OTAs) or build id (for builds). prev_group_id is what
+// 'rollback' republishes.
+
+export interface DeployRow {
+  id: number;
+  ts: number;
+  project: string;
+  kind: 'update' | 'build' | 'submit' | 'rollback';
+  channel: string;
+  sha: string | null;
+  groupId: string | null;
+  prevGroupId: string | null;
+  message: string;
+  status: 'executing' | 'shipped' | 'failed' | 'cancelled';
+  durationMs: number | null;
+  error: string | null;
+}
+
+export interface InsertDeployOpts {
+  project: string;
+  kind: DeployRow['kind'];
+  channel: string;
+  sha?: string | null;
+  prevGroupId?: string | null;
+  message: string;
+}
+
+export function recordDeploy(opts: InsertDeployOpts): number | null {
+  if (!db) return null;
+  const stmt = db.prepare(`
+    INSERT INTO deploys (ts, project, kind, channel, sha, prev_group_id, message, status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 'executing')
+  `);
+  stmt.run([
+    Date.now(),
+    opts.project,
+    opts.kind,
+    opts.channel,
+    opts.sha ?? null,
+    opts.prevGroupId ?? null,
+    opts.message,
+  ]);
+  stmt.free();
+  const r = db.exec('SELECT last_insert_rowid()');
+  const id = r[0]?.values?.[0]?.[0] as number | undefined;
+  scheduleSave();
+  return typeof id === 'number' ? id : null;
+}
+
+export function updateDeployStatus(id: number, opts: { status: DeployRow['status']; groupId?: string | null; durationMs?: number | null; error?: string | null }): void {
+  if (!db) return;
+  const stmt = db.prepare(`
+    UPDATE deploys
+    SET status = ?,
+        group_id = COALESCE(?, group_id),
+        duration_ms = COALESCE(?, duration_ms),
+        error = COALESCE(?, error)
+    WHERE id = ?
+  `);
+  stmt.run([
+    opts.status,
+    opts.groupId ?? null,
+    opts.durationMs ?? null,
+    opts.error ?? null,
+    id,
+  ]);
+  stmt.free();
+  scheduleSave();
+}
+
+// Used for cooldown enforcement: returns the most recent shipped deploy on
+// (project, channel) regardless of kind. null = no prior deploy.
+export function lastDeployForChannel(project: string, channel: string): DeployRow | null {
+  if (!db) return null;
+  const stmt = db.prepare(`
+    SELECT id, ts, project, kind, channel, sha, group_id, prev_group_id, message, status, duration_ms, error
+    FROM deploys
+    WHERE project = ? AND channel = ? AND status = 'shipped'
+    ORDER BY ts DESC LIMIT 1
+  `);
+  stmt.bind([project, channel]);
+  if (!stmt.step()) { stmt.free(); return null; }
+  const r = stmt.get();
+  stmt.free();
+  return {
+    id: r[0] as number,
+    ts: r[1] as number,
+    project: r[2] as string,
+    kind: r[3] as DeployRow['kind'],
+    channel: r[4] as string,
+    sha: (r[5] ?? null) as string | null,
+    groupId: (r[6] ?? null) as string | null,
+    prevGroupId: (r[7] ?? null) as string | null,
+    message: r[8] as string,
+    status: r[9] as DeployRow['status'],
+    durationMs: (r[10] ?? null) as number | null,
+    error: (r[11] ?? null) as string | null,
+  };
+}
+
+export function listDeploys(limit = 20): DeployRow[] {
+  if (!db) return [];
+  const stmt = db.prepare(`
+    SELECT id, ts, project, kind, channel, sha, group_id, prev_group_id, message, status, duration_ms, error
+    FROM deploys ORDER BY ts DESC LIMIT ?
+  `);
+  stmt.bind([Math.max(1, Math.min(200, limit))]);
+  const out: DeployRow[] = [];
+  while (stmt.step()) {
+    const r = stmt.get();
+    out.push({
+      id: r[0] as number,
+      ts: r[1] as number,
+      project: r[2] as string,
+      kind: r[3] as DeployRow['kind'],
+      channel: r[4] as string,
+      sha: (r[5] ?? null) as string | null,
+      groupId: (r[6] ?? null) as string | null,
+      prevGroupId: (r[7] ?? null) as string | null,
+      message: r[8] as string,
+      status: r[9] as DeployRow['status'],
+      durationMs: (r[10] ?? null) as number | null,
+      error: (r[11] ?? null) as string | null,
+    });
+  }
+  stmt.free();
+  return out;
+}
+
+// On boot, mark any 'executing' deploys older than 10 min as 'failed' with
+// a recovery hint — they're stuck because the app crashed mid-run.
+export function reconcileStuckDeploys(): number {
+  if (!db) return 0;
+  const cutoff = Date.now() - 10 * 60 * 1000;
+  const stmt = db.prepare(`
+    UPDATE deploys SET status = 'failed', error = COALESCE(error, 'reconciled on restart — actual EAS state unknown, check eas update:list')
+    WHERE status = 'executing' AND ts < ?
+  `);
+  stmt.run([cutoff]);
+  stmt.free();
+  const r = db.exec('SELECT changes()');
+  const n = r[0]?.values?.[0]?.[0] as number | undefined;
+  if (typeof n === 'number' && n > 0) scheduleSave();
+  return typeof n === 'number' ? n : 0;
 }
 
 // ---- Projects ---------------------------------------------------------

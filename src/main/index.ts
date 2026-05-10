@@ -19,7 +19,8 @@ import { babysitStart, babysitStop, babysitStatus } from './babysit';
 import { listAdvisors, consultAdvisor, extractActions, runCouncil, runShipAudit } from './advisors';
 import { runSeed } from '../scripts/seed-fxv-personas';
 import { startAlertsPolling, stopAlertsPolling, pollAllOnce, alertsConfig } from './alerts';
-import { listAlerts as dbListAlerts, setAlertStatus, deleteAlertRow } from './db';
+import { listAlerts as dbListAlerts, setAlertStatus, deleteAlertRow, reconcileStuckDeploys } from './db';
+import { extractIntent as deployExtractIntent, preparePlan as deployPreparePlan, executePlan as deployExecutePlan, rollback as deployRollback, deployHistory } from './deploy';
 
 dotenv.config({ path: path.join(__dirname, '..', '..', '.env') });
 
@@ -459,6 +460,68 @@ app.whenReady().then(async () => {
   // immediately so the user sees alerts on launch if any sources are wired.
   const ALERT_POLL_MS = Number(process.env.HIVE_ALERTS_INTERVAL_MS) || 10 * 60 * 1000;
   startAlertsPolling(ALERT_POLL_MS, evt => mainWindow?.webContents.send(IPC.AlertEvent, evt));
+
+  // ---- Deploy --------------------------------------------------------
+  // On boot, mark any deploys stuck in 'executing' (i.e. crashed mid-run)
+  // as 'failed' so the history view tells the truth.
+  const stuckCount = reconcileStuckDeploys();
+  if (stuckCount > 0) console.warn(`[deploy] reconciled ${stuckCount} stuck 'executing' row(s) on boot`);
+
+  ipcMain.handle(IPC.ExtractDeployIntent, async (_e, text: string) => {
+    try {
+      const intent = await deployExtractIntent(String(text ?? ''));
+      return { ok: true, ...intent };
+    } catch (err: any) {
+      return { ok: false, error: err?.message ?? String(err) };
+    }
+  });
+  ipcMain.handle(IPC.PrepareDeploy, async (_e, input: { project: string; channel: 'preview' | 'production'; message: string; skipTypecheck?: boolean }) => {
+    try {
+      const plan = await deployPreparePlan({
+        project: input.project,
+        channel: input.channel,
+        message: input.message,
+        skipTypecheck: !!input.skipTypecheck,
+        onLine: (line) => mainWindow?.webContents.send(IPC.DeployLog, line),
+      });
+      return { ok: true, plan };
+    } catch (err: any) {
+      return { ok: false, error: err?.message ?? String(err) };
+    }
+  });
+  ipcMain.handle(IPC.ExecuteDeploy, async (_e, input: { planId: string; confirmation: string }) => {
+    try {
+      const result = await deployExecutePlan({
+        planId: input.planId,
+        confirmation: input.confirmation,
+        onLine: (line) => mainWindow?.webContents.send(IPC.DeployLog, line),
+      });
+      return result;
+    } catch (err: any) {
+      return { ok: false, error: err?.message ?? String(err), deployId: -1, groupId: null, durationMs: 0, log: [], smoke: null };
+    }
+  });
+  ipcMain.handle(IPC.RollbackDeploy, async (_e, input: { project: string; channel: 'preview' | 'production'; toGroupId: string; reason: string }) => {
+    try {
+      const result = await deployRollback({
+        project: input.project,
+        channel: input.channel,
+        toGroupId: input.toGroupId,
+        reason: input.reason,
+        onLine: (line) => mainWindow?.webContents.send(IPC.DeployLog, line),
+      });
+      return result;
+    } catch (err: any) {
+      return { ok: false, error: err?.message ?? String(err), deployId: -1, groupId: null, durationMs: 0, log: [], smoke: null };
+    }
+  });
+  ipcMain.handle(IPC.ListDeploys, (_e, limit?: number) => {
+    try {
+      return { ok: true, deploys: deployHistory(typeof limit === 'number' ? limit : 20) };
+    } catch (err: any) {
+      return { ok: false, error: err?.message ?? String(err), deploys: [] };
+    }
+  });
 
   ipcMain.handle(IPC.GetWorkerDiff, async (_e, workerId: string) => {
     try {

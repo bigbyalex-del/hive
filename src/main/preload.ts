@@ -55,6 +55,12 @@ const IPC = {
   PollAlertsNow: 'hive:poll-alerts-now',
   AlertsConfig: 'hive:alerts-config',
   AlertEvent: 'hive:alert-event',
+  ExtractDeployIntent: 'hive:extract-deploy-intent',
+  PrepareDeploy: 'hive:prepare-deploy',
+  ExecuteDeploy: 'hive:execute-deploy',
+  RollbackDeploy: 'hive:rollback-deploy',
+  ListDeploys: 'hive:list-deploys',
+  DeployLog: 'hive:deploy-log',
 };
 
 contextBridge.exposeInMainWorld('hive', {
@@ -129,6 +135,19 @@ contextBridge.exposeInMainWorld('hive', {
     const listener = (_: Electron.IpcRendererEvent, evt: any) => cb(evt);
     ipcRenderer.on(IPC.AlertEvent, listener);
     return () => ipcRenderer.removeListener(IPC.AlertEvent, listener);
+  },
+  extractDeployIntent: (text: string) => ipcRenderer.invoke(IPC.ExtractDeployIntent, text),
+  prepareDeploy: (input: { project: string; channel: 'preview' | 'production'; message: string; skipTypecheck?: boolean }) =>
+    ipcRenderer.invoke(IPC.PrepareDeploy, input),
+  executeDeploy: (input: { planId: string; confirmation: string }) =>
+    ipcRenderer.invoke(IPC.ExecuteDeploy, input),
+  rollbackDeploy: (input: { project: string; channel: 'preview' | 'production'; toGroupId: string; reason: string }) =>
+    ipcRenderer.invoke(IPC.RollbackDeploy, input),
+  listDeploys: (limit?: number) => ipcRenderer.invoke(IPC.ListDeploys, limit ?? 20),
+  onDeployLog: (cb: (line: string) => void) => {
+    const listener = (_: Electron.IpcRendererEvent, line: string) => cb(line);
+    ipcRenderer.on(IPC.DeployLog, listener);
+    return () => ipcRenderer.removeListener(IPC.DeployLog, listener);
   },
   onBabysitLog: (cb: (line: string) => void) => {
     const listener = (_: Electron.IpcRendererEvent, line: string) => cb(line);
