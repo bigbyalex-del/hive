@@ -8,7 +8,62 @@ Started 2026-05-04. Owner: Alex.
 
 ## 🌅 Next Session — pick up here (2026-05-11)
 
-### 0. State as of end-of-day 2026-05-10 (later)
+### 0. State as of end-of-day 2026-05-10 (very late)
+
+- **Working tree:** clean. All pushed to origin.
+- **Latest:** `2782cc2` v2.4 content pipeline.
+- **Big shifts today after the deploy worker:**
+  - **v2.2** — pulse strip + cell previews (chats now persist) + Programme Lead 1.4× resize + actions triage + Lab/Premium shortcuts updated + restored mic/snap/watch in advise mode
+  - **v2.2 fix** — Ask-bar contextBridge bug fixed (window.hive.runTask was being silently no-op'd; routing moved inline)
+  - **v2.3** — drafts row scanning fxv-content/drafts/* with hover-to-play hero + artifact dots
+  - **v2.4** — full content pipeline: writer + renderer + orchestrator + manual `▣ generate draft` trigger + progress modal
+
+### 0a. Sister project: fxv-content/
+
+Lives at `C:/Users/Fusion/fxv-content/`. Sibling to FXV repo + Hive.
+  - `templates/` — blog.html (FXV-styled), hero-formula.html, hero-quote.html, hero-stat.html (Hyperframes compositions)
+  - `seed-topics.json` + `queue.json` — topic queue
+  - `drafts/2026-05-12-polarised-vs-pyramidal/` — first hand-built worked example (post.md, post.html, hero.html, hero.mp4, ig-carousel.json, tiktok-script.md, twitter-thread.md, meta.json)
+  - Hyperframes works end-to-end — render command is `npm run render` from fxv-videos/, picks up index.html. Pipeline swaps the index.html temporarily then restores.
+  - ffmpeg installed via winget at `C:/Users/Fusion/AppData/Local/Microsoft/WinGet/Packages/Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe/ffmpeg-8.1.1-full_build/bin` — pipeline resolves it into PATH for the spawned hyperframes process.
+
+### 0b. Smoke-test sequence for v2.4 (do this fresh)
+
+1. `npm start`. Confirm titlebar shows `▣ generate draft` (purple, between ↻ refresh memory and ⏏ deploy).
+2. Drafts row should be visible above PAGES with the polarised-vs-pyramidal card. Hover → hero.mp4 plays muted. Click → opens folder. Shift+click → opens hero.mp4.
+3. Click `▣ generate draft`. Confirm prompt shows next topic ("What ACWR actually tells you" — first in queue).
+4. Confirm. Modal opens with stage tracker. Watch:
+   - `pick → research` (consults fxv:load + fxv:readiness)
+   - `draft-post` (~30s Sonnet)
+   - `render-post-html`
+   - `hero-spec` (~10s Sonnet)
+   - `render-hero-html`
+   - `render-hero-mp4` (~60-90s Hyperframes spawn)
+   - `social` (3 × Haiku in parallel)
+   - `write` (drops draft folder)
+5. On success: drafts row pulses, new card appears with the autonomous output.
+6. Open the new draft folder. Read post.md to gauge writer-voice quality. Watch hero.mp4 to gauge composition fit.
+
+### 0c. What to fix BEFORE the first real run, if you want polish
+
+- **Drafts row eats vertical space** — cells get squashed when 2+ cards visible. Fix: cap card video at 120px instead of 180px, OR add collapse arrow on the drafts row label, OR auto-collapse when 0-1 drafts.
+- **Hero video shows black until hover** — needs a poster frame. Fix: extract first frame as `hero-poster.jpg` during render via ffmpeg, set `<video poster="...">` in the card.
+- **Voice-tuning** — read the first autonomous draft. If it's off-brand (too hype-y, emoji creeping in, weak citations), tighten the FXV_VOICE_RULES in contentWriter.ts.
+
+### 0d. Phase 2 + 3 of the content pipeline (deferred)
+
+- **Phase 2 (~2hr)** — Sunday 6pm in-app cron. Add to the existing pulse refresh loop: if it's Sunday after 18:00 and no draft has been generated this calendar week, fire `generateNextDraft` automatically. Notify via the pulse strip on completion.
+- **Phase 3 (~3hr)** — queue auto-refill from advisor chats + brainstorm actions. Scan recent advisor chats for question patterns ("how do I X?" / "is Y better than Z?") and brainstorm actions tagged "content" → propose new queue entries. Top up when queue drops below 4.
+
+### 0e. iCloud screenshot tray (queued by user — daily friction killer)
+
+User confirmed iCloud is enabled on iPhone. They've installed (or are installing) iCloud for Windows. After confirming `C:/Users/Fusion/Pictures/iCloud Photos/Photos/` is syncing, build:
+- `src/main/screenshotsWatcher.ts` — folder watch via `fs.watch`, emit new file events
+- IPC for tray + thumbnails
+- UI: titlebar `📷 in (N)` chip → expandable tray with thumbnails, drag onto a persona's cell to ask about it, or click → opens advisor modal pre-loaded with image attached + UI/UX persona selected
+- ~3hr. Same code pattern as the drafts row — folder watcher + tray UI.
+
+### 1. Today's commits (2026-05-10 evening through late)
 
 - **2 commits ahead of origin** (deploy backend + UI) on top of the earlier 18 already pushed. Ready to push.
 - **Working tree:** clean.
