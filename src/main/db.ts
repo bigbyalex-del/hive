@@ -96,6 +96,24 @@ export async function initDb(): Promise<void> {
       created_at INTEGER NOT NULL,
       last_used INTEGER NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS alerts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source TEXT NOT NULL,
+      external_id TEXT NOT NULL,
+      severity TEXT NOT NULL,
+      ts INTEGER NOT NULL,
+      source_ts INTEGER,
+      title TEXT NOT NULL,
+      body TEXT,
+      url TEXT,
+      file_hint TEXT,
+      persona_id TEXT,
+      status TEXT NOT NULL DEFAULT 'new',
+      raw_json TEXT
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_alerts_ext ON alerts(source, external_id);
+    CREATE INDEX IF NOT EXISTS idx_alerts_status ON alerts(status);
   `);
 
   // Lightweight migrations — sql.js doesn't fail on duplicate ALTER, but we
@@ -263,6 +281,31 @@ export function insertChunk(opts: { agentId: string; tag?: string; content: stri
   return typeof id === 'number' ? id : null;
 }
 
+// Drops every chunk owned by an agent across all projects. Used by the
+// advisor seed script to reset a persona's knowledge before re-ingesting,
+// so seeds are idempotent rather than additive.
+export function deleteChunksForAgent(agentId: string): number {
+  if (!db) return 0;
+  const stmt = db.prepare('DELETE FROM chunks WHERE agent_id = ?');
+  stmt.bind([agentId]);
+  stmt.step();
+  stmt.free();
+  const r = db.exec('SELECT changes()');
+  const n = r[0]?.values?.[0]?.[0] as number | undefined;
+  scheduleSave();
+  return typeof n === 'number' ? n : 0;
+}
+
+export function countChunksForAgent(agentId: string): number {
+  if (!db) return 0;
+  const stmt = db.prepare('SELECT COUNT(*) FROM chunks WHERE agent_id = ?');
+  stmt.bind([agentId]);
+  stmt.step();
+  const row = stmt.get();
+  stmt.free();
+  return Number(row[0] ?? 0);
+}
+
 export function loadChunks(agentId: string, projectId?: number | null): { id: number; tag: string | null; content: string; embedding: number[] }[] {
   if (!db) return [];
   const stmt = projectId == null
@@ -276,6 +319,127 @@ export function loadChunks(agentId: string, projectId?: number | null): { id: nu
   }
   stmt.free();
   return out;
+}
+
+// ---- Alerts -----------------------------------------------------------
+//
+// Each alert is a single bug / crash / production issue routed to the right
+// persona. Dedupe is per (source, external_id) so re-polling the same Sentry
+// issue doesn't create duplicates.
+
+export interface AlertRow {
+  id: number;
+  source: string;          // 'github' | 'sentry' | 'supabase' | 'asc'
+  externalId: string;
+  severity: 'red' | 'amber' | 'yellow' | 'info';
+  ts: number;
+  sourceTs: number | null;
+  title: string;
+  body: string | null;
+  url: string | null;
+  fileHint: string | null;
+  personaId: string | null;
+  status: 'new' | 'seen' | 'acked' | 'dismissed';
+  rawJson: string | null;
+}
+
+export interface InsertAlertOpts {
+  source: string;
+  externalId: string;
+  severity: AlertRow['severity'];
+  sourceTs?: number | null;
+  title: string;
+  body?: string | null;
+  url?: string | null;
+  fileHint?: string | null;
+  personaId?: string | null;
+  rawJson?: any;
+}
+
+// Returns the inserted alert id, or null if (source, external_id) already
+// exists. Caller can treat null as "already seen, skip".
+export function insertAlert(opts: InsertAlertOpts): number | null {
+  if (!db) return null;
+  // Dedupe check.
+  const dupCheck = db.prepare('SELECT id FROM alerts WHERE source = ? AND external_id = ?');
+  dupCheck.bind([opts.source, opts.externalId]);
+  if (dupCheck.step()) {
+    dupCheck.free();
+    return null;
+  }
+  dupCheck.free();
+  const stmt = db.prepare(`
+    INSERT INTO alerts (source, external_id, severity, ts, source_ts, title, body, url, file_hint, persona_id, status, raw_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?)
+  `);
+  stmt.run([
+    opts.source,
+    opts.externalId,
+    opts.severity,
+    Date.now(),
+    opts.sourceTs ?? null,
+    opts.title,
+    opts.body ?? null,
+    opts.url ?? null,
+    opts.fileHint ?? null,
+    opts.personaId ?? null,
+    opts.rawJson ? JSON.stringify(opts.rawJson) : null,
+  ]);
+  stmt.free();
+  const r = db.exec('SELECT last_insert_rowid()');
+  const id = r[0]?.values?.[0]?.[0] as number | undefined;
+  scheduleSave();
+  return typeof id === 'number' ? id : null;
+}
+
+export function listAlerts(opts: { status?: AlertRow['status'] | 'open' | 'all'; limit?: number } = {}): AlertRow[] {
+  if (!db) return [];
+  let where = '';
+  const args: any[] = [];
+  const status = opts.status ?? 'open';
+  if (status === 'open') { where = "WHERE status IN ('new','seen')"; }
+  else if (status !== 'all') { where = 'WHERE status = ?'; args.push(status); }
+  const limit = Math.max(1, Math.min(500, opts.limit ?? 200));
+  const sql = `SELECT id, source, external_id, severity, ts, source_ts, title, body, url, file_hint, persona_id, status, raw_json FROM alerts ${where} ORDER BY ts DESC LIMIT ${limit}`;
+  const stmt = db.prepare(sql);
+  if (args.length) stmt.bind(args);
+  const out: AlertRow[] = [];
+  while (stmt.step()) {
+    const row = stmt.get();
+    out.push({
+      id: row[0] as number,
+      source: row[1] as string,
+      externalId: row[2] as string,
+      severity: row[3] as AlertRow['severity'],
+      ts: row[4] as number,
+      sourceTs: (row[5] ?? null) as number | null,
+      title: row[6] as string,
+      body: (row[7] ?? null) as string | null,
+      url: (row[8] ?? null) as string | null,
+      fileHint: (row[9] ?? null) as string | null,
+      personaId: (row[10] ?? null) as string | null,
+      status: row[11] as AlertRow['status'],
+      rawJson: (row[12] ?? null) as string | null,
+    });
+  }
+  stmt.free();
+  return out;
+}
+
+export function setAlertStatus(id: number, status: AlertRow['status']): void {
+  if (!db) return;
+  const stmt = db.prepare('UPDATE alerts SET status = ? WHERE id = ?');
+  stmt.run([status, id]);
+  stmt.free();
+  scheduleSave();
+}
+
+export function deleteAlertRow(id: number): void {
+  if (!db) return;
+  const stmt = db.prepare('DELETE FROM alerts WHERE id = ?');
+  stmt.run([id]);
+  stmt.free();
+  scheduleSave();
 }
 
 // ---- Projects ---------------------------------------------------------
