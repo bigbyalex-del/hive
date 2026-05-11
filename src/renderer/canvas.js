@@ -769,7 +769,37 @@
     setChosenPhotosFolder(res.folder);
     photosLoaded = false;
     refreshPhotos();
+    startWatcher();
   });
+
+  // Folder watcher → auto-refresh thumbnail grid when iPhone screenshots
+  // land (debounced because iCloud often touches files several times as
+  // it syncs).
+  let watchDebounce = null;
+  let watcherActive = false;
+  async function startWatcher() {
+    const folder = chosenPhotosFolder();
+    if (!folder) return;
+    try {
+      await window.hive.watchPhotosFolder(folder);
+      watcherActive = true;
+    } catch {}
+  }
+  window.hive.onPhotosFolderEvent?.(() => {
+    if (!watcherActive) return;
+    if (watchDebounce) clearTimeout(watchDebounce);
+    watchDebounce = setTimeout(() => {
+      photosLoaded = false;
+      refreshPhotos();
+    }, 800);
+  });
+  // Wrap window.__lsCanvas.open so the watcher starts whenever the
+  // canvas view opens (without reassigning the local function decl).
+  const _exposedOpen = window.__lsCanvas.open;
+  window.__lsCanvas.open = async function() {
+    await _exposedOpen();
+    if (chosenPhotosFolder()) startWatcher();
+  };
 
   // ── Open / close ───────────────────────────────────────────────────
 
@@ -805,10 +835,12 @@
 
   window.__lsCanvas = { open, close, isVisible };
 
-  // Wire sidebar nav click into open()
+  // Wire sidebar nav click into open() — kick off the watcher whenever
+  // the canvas view opens so new iPhone screenshots refresh the grid.
   document.querySelectorAll('.linear-shell .ls-nav-item[data-view="canvas"]').forEach(el => {
-    el.addEventListener('click', () => {
-      open();
+    el.addEventListener('click', async () => {
+      await open();
+      if (typeof startWatcher === 'function' && chosenPhotosFolder()) startWatcher();
     }, true);  // capture phase so we run before the default handler that flashes a toast
   });
 })();

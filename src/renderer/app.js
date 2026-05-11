@@ -4074,8 +4074,41 @@ window.__extractActionsFor = async (personaId, question, reply) => {
     setTimeout(() => t.remove(), 2400);
   }
 
+  // One-time migration: port any legacy right-rail actions out of
+  // localStorage (key 'fxv.brainstorm.actions') into the new actions
+  // table. Marks completion with a flag so this never re-runs.
+  async function migrateLegacyActions() {
+    const FLAG = 'hive.legacyActionsMigrated';
+    try {
+      if (localStorage.getItem(FLAG) === '1') return;
+      const raw = localStorage.getItem('fxv.brainstorm.actions');
+      if (!raw) { localStorage.setItem(FLAG, '1'); return; }
+      const legacy = JSON.parse(raw);
+      if (!Array.isArray(legacy) || !legacy.length) { localStorage.setItem(FLAG, '1'); return; }
+      let migrated = 0;
+      for (const a of legacy) {
+        const content = a.summary || a.text || a.content;
+        if (!content) continue;
+        const urg = a.urgency || a.priority || 'medium';
+        const priority = ['urgent', 'high', 'medium', 'low'].includes(urg) ? urg : (urg === 'high' ? 'high' : urg === 'low' ? 'low' : 'medium');
+        const status = a.status === 'done' ? 'done' : 'todo';
+        await window.hive.createAction({
+          content, priority, status,
+          personaId: a.personaId ?? null,
+          sourceQuestion: a.question ?? null,
+        });
+        migrated++;
+      }
+      localStorage.setItem(FLAG, '1');
+      console.log('[hive] migrated', migrated, 'legacy actions into the actions table');
+    } catch (err) {
+      console.warn('[hive] legacy action migration failed:', err);
+    }
+  }
+
   // Boot
   (async function init() {
+    await migrateLegacyActions();
     await refreshSidebar();
     await refreshActions();
     renderFilterChips();

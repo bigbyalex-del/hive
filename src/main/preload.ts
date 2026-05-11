@@ -85,6 +85,9 @@ const IPC = {
   ListPhotos: 'hive:list-photos',
   GetPhotoFull: 'hive:get-photo-full',
   PickPhotosFolder: 'hive:pick-photos-folder',
+  WatchPhotosFolder: 'hive:watch-photos-folder',
+  UnwatchPhotosFolder: 'hive:unwatch-photos-folder',
+  PhotosFolderEvent: 'hive:photos-folder-event',
 };
 
 contextBridge.exposeInMainWorld('hive', {
@@ -213,4 +216,11 @@ contextBridge.exposeInMainWorld('hive', {
   listPhotos: (opts?: { folder?: string; limit?: number }) => ipcRenderer.invoke(IPC.ListPhotos, opts ?? {}),
   getPhotoFull: (path: string) => ipcRenderer.invoke(IPC.GetPhotoFull, path),
   pickPhotosFolder: () => ipcRenderer.invoke(IPC.PickPhotosFolder),
+  watchPhotosFolder: (folder: string) => ipcRenderer.invoke(IPC.WatchPhotosFolder, folder),
+  unwatchPhotosFolder: () => ipcRenderer.invoke(IPC.UnwatchPhotosFolder),
+  onPhotosFolderEvent: (cb: (evt: any) => void) => {
+    const listener = (_: Electron.IpcRendererEvent, evt: any) => cb(evt);
+    ipcRenderer.on(IPC.PhotosFolderEvent, listener);
+    return () => ipcRenderer.removeListener(IPC.PhotosFolderEvent, listener);
+  },
 });

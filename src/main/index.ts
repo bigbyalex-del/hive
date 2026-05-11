@@ -544,7 +544,17 @@ app.whenReady().then(async () => {
       const fs = require('fs');
       const path = require('path');
       const os = require('os');
-      const defaultFolder = path.join(os.homedir(), 'Pictures', 'iCloud Photos', 'Photos');
+      // Default-folder fallback chain. HiveDrop wins if it exists (the
+       //  iCloud Drive folder iPhone Shortcuts auto-save into); then the
+       //  legacy iCloud-for-Windows path; finally just Pictures.
+      const candidates = [
+        path.join(os.homedir(), 'iCloudDrive', 'HiveDrop'),
+        path.join(os.homedir(), 'iCloud Drive', 'HiveDrop'),
+        path.join(os.homedir(), 'Pictures', 'iCloud Photos', 'Photos'),
+        path.join(os.homedir(), 'OneDrive', 'Pictures', 'Screenshots'),
+        path.join(os.homedir(), 'Pictures'),
+      ];
+      const defaultFolder = candidates.find(p => fs.existsSync(p)) ?? candidates[0];
       const folder = opts.folder || defaultFolder;
       if (!fs.existsSync(folder)) {
         return { ok: true, photos: [], folder, exists: false };
@@ -583,6 +593,33 @@ app.whenReady().then(async () => {
       return { ok: true, photos, folder, exists: true };
     } catch (err: any) {
       return { ok: false, error: err?.message ?? String(err), photos: [] };
+    }
+  });
+
+  // Photos folder watcher — fires PhotosFolderEvent on any add/change so
+  // the renderer can refresh its thumbnail grid as new screenshots land.
+  let photosWatcher: any = null;
+  ipcMain.handle(IPC.WatchPhotosFolder, async (_e, folder: string) => {
+    try {
+      if (photosWatcher) { try { photosWatcher.close(); } catch {} photosWatcher = null; }
+      if (!folder) return { ok: false, error: 'no folder' };
+      const fs = require('fs');
+      if (!fs.existsSync(folder)) return { ok: false, error: 'folder missing' };
+      photosWatcher = fs.watch(folder, { persistent: false }, (event: string, filename: string) => {
+        if (!filename) return;
+        mainWindow?.webContents.send(IPC.PhotosFolderEvent, { event, filename, folder });
+      });
+      return { ok: true };
+    } catch (err: any) {
+      return { ok: false, error: err?.message ?? String(err) };
+    }
+  });
+  ipcMain.handle(IPC.UnwatchPhotosFolder, async () => {
+    try {
+      if (photosWatcher) { photosWatcher.close(); photosWatcher = null; }
+      return { ok: true };
+    } catch (err: any) {
+      return { ok: false, error: err?.message ?? String(err) };
     }
   });
 

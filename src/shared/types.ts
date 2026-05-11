@@ -111,6 +111,9 @@ export const IPC = {
   ListPhotos: 'hive:list-photos',
   GetPhotoFull: 'hive:get-photo-full',
   PickPhotosFolder: 'hive:pick-photos-folder',
+  WatchPhotosFolder: 'hive:watch-photos-folder',
+  UnwatchPhotosFolder: 'hive:unwatch-photos-folder',
+  PhotosFolderEvent: 'hive:photos-folder-event',
 } as const;
 
 export type AgentEvent =
