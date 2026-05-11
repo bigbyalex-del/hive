@@ -1783,10 +1783,26 @@ body.mode-linear .linear-shell {
 }
 
 /* Hide everything that's not the linear shell when in mode-linear */
-body.mode-linear > *:not(.linear-shell):not(.ls-cmdpalette):not(script) {
+body.mode-linear > *:not(.linear-shell):not(.ls-cmdpalette):not(.ls-canvas-shell):not(script) {
   display: none !important;
 }
 body.mode-linear > .ls-cmdpalette { z-index: 50; }
+/* Canvas shell is a body-level sibling; overlay it on top of the
+   linear-shell main + detail columns (sidebar stays visible). Must
+   be z-index ABOVE the linear-shell (which is z-index 5) or the
+   linear-shell's main/detail columns will mask it. */
+body.mode-linear.canvas-active > .ls-canvas-shell {
+  display: grid !important;
+  position: fixed;
+  top: 0;
+  left: 232px;
+  right: 0;
+  bottom: 0;
+  z-index: 10;
+}
+.ls-canvas-shell {
+  display: none;
+}
 
 /* Sidebar */
 .ls-sidebar {
@@ -2252,6 +2268,111 @@ body.mode-linear.canvas-active .ls-canvas-shell {
   background: var(--ls-surface);
   border-right: 1px solid var(--ls-border);
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.ls-canvas-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--ls-border);
+  flex-shrink: 0;
+}
+.ls-canvas-tab {
+  flex: 1;
+  height: 36px;
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--ls-text-faint);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  font-weight: 500;
+}
+.ls-canvas-tab:hover { color: var(--ls-text-dim); }
+.ls-canvas-tab.active {
+  color: var(--ls-text);
+  border-bottom-color: var(--ls-accent);
+}
+.ls-canvas-tab-panel {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.ls-photos-folder {
+  padding: 6px 14px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 10px;
+  color: var(--ls-text-faint);
+  border-bottom: 1px solid var(--ls-border-soft);
+  word-break: break-all;
+}
+.ls-photos-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 8px;
+}
+.ls-photo-thumb {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  background: var(--ls-bg);
+  border: 1px solid var(--ls-border);
+  border-radius: 4px;
+  overflow: hidden;
+  cursor: grab;
+  user-select: none;
+}
+.ls-photo-thumb:hover { border-color: var(--ls-accent); }
+.ls-photo-thumb.unsupported {
+  display: grid;
+  place-items: center;
+  color: var(--ls-text-faint);
+  font-size: 9px;
+  text-align: center;
+  padding: 4px;
+  cursor: not-allowed;
+}
+.ls-photo-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+}
+.ls-photo-thumb:active { cursor: grabbing; }
+.ls-photo-thumb-date {
+  position: absolute;
+  bottom: 2px; left: 2px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 9px;
+  color: #fff;
+  background: rgba(0,0,0,0.6);
+  padding: 1px 4px;
+  border-radius: 2px;
+}
+.ls-photos-empty {
+  padding: 24px 16px;
+  color: var(--ls-text-faint);
+  font-size: 12px;
+  line-height: 1.6;
+  text-align: center;
+}
+.ls-photos-empty a {
+  color: var(--ls-accent);
+  text-decoration: none;
+}
+.ls-photos-empty code {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 10px;
+  color: var(--ls-text-dim);
+  background: var(--ls-bg);
+  padding: 1px 4px;
+  border-radius: 3px;
+  border: 1px solid var(--ls-border);
+  display: inline-block;
+  margin-top: 6px;
+  word-break: break-all;
 }
 .ls-canvas-rail-h {
   display: flex; align-items: center; gap: 8px;

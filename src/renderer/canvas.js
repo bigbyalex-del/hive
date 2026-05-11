@@ -654,14 +654,134 @@
     scheduleSave();
   });
 
+  // ── Tabs (Canvases | Photos) ──────────────────────────────────────
+  const RAIL = document.getElementById('ls-canvas-rail');
+  let photosLoaded = false;
+  function setTab(name) {
+    RAIL?.querySelectorAll('.ls-canvas-tab').forEach(el => el.classList.toggle('active', el.dataset.tab === name));
+    RAIL?.querySelectorAll('.ls-canvas-tab-panel').forEach(el => {
+      el.style.display = el.dataset.panel === name ? '' : 'none';
+    });
+    if (name === 'photos' && !photosLoaded) refreshPhotos();
+  }
+  RAIL?.querySelectorAll('.ls-canvas-tab').forEach(t => {
+    t.addEventListener('click', () => setTab(t.dataset.tab));
+  });
+
+  // ── Photos tab ───────────────────────────────────────────────────
+  const PHOTOS_GRID = document.getElementById('ls-photos-grid');
+  const PHOTOS_FOLDER_LBL = document.getElementById('ls-photos-folder');
+  const PHOTOS_EMPTY = document.getElementById('ls-photos-empty');
+
+  const PHOTOS_FOLDER_KEY = 'hive.photosFolder';
+  function chosenPhotosFolder() { try { return localStorage.getItem(PHOTOS_FOLDER_KEY) || undefined; } catch { return undefined; } }
+  function setChosenPhotosFolder(p) { try { localStorage.setItem(PHOTOS_FOLDER_KEY, p); } catch {} }
+
+  async function refreshPhotos() {
+    photosLoaded = true;
+    if (!PHOTOS_GRID || !PHOTOS_EMPTY) return;
+    PHOTOS_GRID.innerHTML = '<div style="grid-column:1/-1;color:var(--ls-text-faint);font-size:11px;padding:14px 6px;text-align:center;">Loading…</div>';
+    PHOTOS_EMPTY.style.display = 'none';
+    let res;
+    const folder = chosenPhotosFolder();
+    try { res = await window.hive.listPhotos({ folder, limit: 200 }); } catch (err) { res = { ok: false, error: String(err) }; }
+    if (!res?.ok) {
+      PHOTOS_GRID.innerHTML = '';
+      PHOTOS_EMPTY.style.display = '';
+      PHOTOS_EMPTY.innerHTML = `Failed to read photos folder.<br><span style="color:var(--ls-text-faint);">${escapeHtml(res?.error ?? 'unknown')}</span>`;
+      return;
+    }
+    if (PHOTOS_FOLDER_LBL) PHOTOS_FOLDER_LBL.textContent = res.folder ?? '';
+    if (!res.exists) {
+      PHOTOS_GRID.innerHTML = '';
+      PHOTOS_EMPTY.style.display = '';
+      PHOTOS_EMPTY.innerHTML = `Folder not found. The new iCloud-for-Windows uses Microsoft Photos virtual placeholders — there's no real folder. Click the <strong>…</strong> button above to pick whatever folder actually has the images you want (e.g. your Windows Screenshots folder, or a folder you've exported iCloud photos into).<br><br><code>${escapeHtml(res.folder ?? '')}</code>`;
+      return;
+    }
+    if (!res.photos.length) {
+      PHOTOS_GRID.innerHTML = '';
+      PHOTOS_EMPTY.style.display = '';
+      PHOTOS_EMPTY.innerHTML = `Folder is empty — wait for iCloud to sync, then refresh.<br><code>${escapeHtml(res.folder)}</code>`;
+      return;
+    }
+    PHOTOS_EMPTY.style.display = 'none';
+    PHOTOS_GRID.innerHTML = res.photos.map(p => {
+      const dt = new Date(p.mtime);
+      const dateLbl = dt.toLocaleDateString([], { month: 'short', day: 'numeric' });
+      if (!p.thumbDataUrl) {
+        return `<div class="ls-photo-thumb unsupported" title="${escapeHtml(p.name)} — ${p.ext} not supported. Switch iPhone Camera to 'Most Compatible' for JPG.">${escapeHtml(p.ext.slice(1).toUpperCase())}</div>`;
+      }
+      return `<div class="ls-photo-thumb" draggable="true" data-photo="${escapeHtml(p.path)}" title="${escapeHtml(p.name)} · ${dt.toLocaleString()}">
+        <img src="${p.thumbDataUrl}" alt="" />
+        <span class="ls-photo-thumb-date">${dateLbl}</span>
+      </div>`;
+    }).join('');
+    wirePhotoThumbs();
+  }
+
+  function wirePhotoThumbs() {
+    PHOTOS_GRID.querySelectorAll('.ls-photo-thumb[data-photo]').forEach(el => {
+      el.addEventListener('click', () => placePhoto(el.dataset.photo));
+      el.addEventListener('dragstart', e => {
+        e.dataTransfer.setData('text/plain', 'hive-photo:' + el.dataset.photo);
+        e.dataTransfer.effectAllowed = 'copy';
+      });
+    });
+  }
+
+  async function placePhoto(photoPath, x, y) {
+    if (!stage) return;
+    if (!currentCanvasId) await newCanvas();
+    const res = await window.hive.getPhotoFull(photoPath);
+    if (!res?.ok) {
+      setStatus('photo load failed · ' + (res?.error ?? 'unknown'));
+      return;
+    }
+    const c = (x != null && y != null) ? { x, y } : stageCenter();
+    spawnImage(res.dataUrl, c.x, c.y);
+  }
+
+  // Augment the existing stage drop handler to recognise photo-thumb drags.
+  // The original drop listener only handles e.dataTransfer.files — add a
+  // sibling listener for the text/plain payload our thumbs emit.
+  STAGE_HOST.addEventListener('drop', async e => {
+    const txt = e.dataTransfer?.getData('text/plain');
+    if (txt && txt.startsWith('hive-photo:')) {
+      e.preventDefault();
+      STAGE_HOST.classList.remove('dragover');
+      const photoPath = txt.slice('hive-photo:'.length);
+      const rect = STAGE_HOST.getBoundingClientRect();
+      const scale = stage.scaleX();
+      const dropX = (e.clientX - rect.left - stage.x()) / scale;
+      const dropY = (e.clientY - rect.top - stage.y()) / scale;
+      placePhoto(photoPath, dropX, dropY);
+    }
+  });
+  STAGE_HOST.addEventListener('dragover', e => {
+    const txt = e.dataTransfer?.types?.includes('text/plain');
+    if (txt) { e.preventDefault(); STAGE_HOST.classList.add('dragover'); }
+  });
+
+  document.getElementById('ls-photos-refresh')?.addEventListener('click', () => { photosLoaded = false; refreshPhotos(); });
+  document.getElementById('ls-photos-pick')?.addEventListener('click', async () => {
+    const res = await window.hive.pickPhotosFolder();
+    if (!res?.ok) return;
+    setChosenPhotosFolder(res.folder);
+    photosLoaded = false;
+    refreshPhotos();
+  });
+
   // ── Open / close ───────────────────────────────────────────────────
 
-  function isVisible() { return SHELL.style.display !== 'none'; }
+  function isVisible() { return document.body.classList.contains('canvas-active'); }
 
   async function open() {
+    console.log('[hive canvas] open() — body classes:', document.body.className);
     document.body.classList.add('canvas-active');
     SHELL.style.display = '';
+    SHELL.style.visibility = 'visible';
     initStage();
+    console.log('[hive canvas] stage host rect:', STAGE_HOST.getBoundingClientRect());
     // Resize handler kicks in via ResizeObserver — but Konva needs an initial sync now too.
     requestAnimationFrame(() => {
       const r = STAGE_HOST.getBoundingClientRect();
@@ -681,7 +801,6 @@
 
   function close() {
     document.body.classList.remove('canvas-active');
-    SHELL.style.display = 'none';
   }
 
   window.__lsCanvas = { open, close, isVisible };

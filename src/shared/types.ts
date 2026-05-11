@@ -108,6 +108,9 @@ export const IPC = {
   CreateCanvas: 'hive:create-canvas',
   SaveCanvas: 'hive:save-canvas',
   DeleteCanvas: 'hive:delete-canvas',
+  ListPhotos: 'hive:list-photos',
+  GetPhotoFull: 'hive:get-photo-full',
+  PickPhotosFolder: 'hive:pick-photos-folder',
 } as const;
 
 export type AgentEvent =

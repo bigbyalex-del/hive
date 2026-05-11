@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, globalShortcut } from 'electron';
+import { app, BrowserWindow, ipcMain, globalShortcut, nativeImage, dialog } from 'electron';
 import * as path from 'path';
 import * as dotenv from 'dotenv';
 import { Orchestrator } from './orchestrator';
@@ -530,6 +530,87 @@ app.whenReady().then(async () => {
     try {
       dbDeleteCanvas(id);
       return { ok: true };
+    } catch (err: any) {
+      return { ok: false, error: err?.message ?? String(err) };
+    }
+  });
+
+  // Photos — scans a folder (default: iCloud Photos on Windows) for
+  // images and returns lightweight thumbnails via Electron's nativeImage.
+  // Full-resolution images load on demand via GetPhotoFull when the user
+  // actually drops one onto a canvas.
+  ipcMain.handle(IPC.ListPhotos, async (_e, opts: { folder?: string; limit?: number } = {}) => {
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      const os = require('os');
+      const defaultFolder = path.join(os.homedir(), 'Pictures', 'iCloud Photos', 'Photos');
+      const folder = opts.folder || defaultFolder;
+      if (!fs.existsSync(folder)) {
+        return { ok: true, photos: [], folder, exists: false };
+      }
+      const exts = new Set(['.jpg', '.jpeg', '.png', '.heic', '.heif', '.webp', '.gif']);
+      const entries = fs.readdirSync(folder, { withFileTypes: true });
+      const limit = Math.max(10, Math.min(500, opts.limit ?? 200));
+      const files = entries
+        .filter((e: any) => e.isFile())
+        .map((e: any) => {
+          const full = path.join(folder, e.name);
+          let mtime = 0; let size = 0;
+          try { const st = fs.statSync(full); mtime = st.mtimeMs; size = st.size; } catch {}
+          return { name: e.name, path: full, mtime, size, ext: path.extname(e.name).toLowerCase() };
+        })
+        .filter((f: any) => exts.has(f.ext))
+        .sort((a: any, b: any) => b.mtime - a.mtime)
+        .slice(0, limit);
+      const photos = files.map((f: any) => {
+        let thumbDataUrl: string | null = null;
+        try {
+          // .heic / .heif aren't supported by Electron's nativeImage on
+          // Windows — skip the thumb for those (we still surface the row).
+          if (f.ext === '.heic' || f.ext === '.heif') {
+            thumbDataUrl = null;
+          } else {
+            const img = nativeImage.createFromPath(f.path);
+            if (!img.isEmpty()) {
+              const thumb = img.resize({ width: 160, quality: 'good' });
+              thumbDataUrl = thumb.toDataURL();
+            }
+          }
+        } catch {}
+        return { name: f.name, path: f.path, mtime: f.mtime, size: f.size, ext: f.ext, thumbDataUrl };
+      });
+      return { ok: true, photos, folder, exists: true };
+    } catch (err: any) {
+      return { ok: false, error: err?.message ?? String(err), photos: [] };
+    }
+  });
+
+  ipcMain.handle(IPC.PickPhotosFolder, async () => {
+    try {
+      const res = await dialog.showOpenDialog(mainWindow!, {
+        properties: ['openDirectory'],
+        title: 'Pick a folder of photos to surface in Hive',
+      });
+      if (res.canceled || !res.filePaths.length) return { ok: false, cancelled: true };
+      return { ok: true, folder: res.filePaths[0] };
+    } catch (err: any) {
+      return { ok: false, error: err?.message ?? String(err) };
+    }
+  });
+
+  ipcMain.handle(IPC.GetPhotoFull, async (_e, photoPath: string) => {
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      if (!photoPath || !fs.existsSync(photoPath)) return { ok: false, error: 'not found' };
+      const ext = path.extname(photoPath).toLowerCase();
+      if (ext === '.heic' || ext === '.heif') {
+        return { ok: false, error: 'HEIC not supported — set iPhone to "Most Compatible" or convert.' };
+      }
+      const img = nativeImage.createFromPath(photoPath);
+      if (img.isEmpty()) return { ok: false, error: 'could not decode' };
+      return { ok: true, dataUrl: img.toDataURL() };
     } catch (err: any) {
       return { ok: false, error: err?.message ?? String(err) };
     }

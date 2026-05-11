@@ -82,6 +82,9 @@ const IPC = {
   CreateCanvas: 'hive:create-canvas',
   SaveCanvas: 'hive:save-canvas',
   DeleteCanvas: 'hive:delete-canvas',
+  ListPhotos: 'hive:list-photos',
+  GetPhotoFull: 'hive:get-photo-full',
+  PickPhotosFolder: 'hive:pick-photos-folder',
 };
 
 contextBridge.exposeInMainWorld('hive', {
@@ -207,4 +210,7 @@ contextBridge.exposeInMainWorld('hive', {
   createCanvas: (input: { name: string; projectId?: number | null; stateJson?: string }) => ipcRenderer.invoke(IPC.CreateCanvas, input),
   saveCanvas: (input: { id: number; stateJson: string; name?: string }) => ipcRenderer.invoke(IPC.SaveCanvas, input),
   deleteCanvas: (id: number) => ipcRenderer.invoke(IPC.DeleteCanvas, id),
+  listPhotos: (opts?: { folder?: string; limit?: number }) => ipcRenderer.invoke(IPC.ListPhotos, opts ?? {}),
+  getPhotoFull: (path: string) => ipcRenderer.invoke(IPC.GetPhotoFull, path),
+  pickPhotosFolder: () => ipcRenderer.invoke(IPC.PickPhotosFolder),
 });

@@ -629,13 +629,29 @@
        Konva-backed infinite canvas. Screenshots + annotation + move.
        Hidden until the Canvas sidebar item is clicked.
   ═══════════════════════════════════════════════════════════════ -->
-  <div class="ls-canvas-shell" id="ls-canvas-shell" style="display:none;">
+  <div class="ls-canvas-shell" id="ls-canvas-shell">
     <div class="ls-canvas-rail" id="ls-canvas-rail">
-      <div class="ls-canvas-rail-h">
-        <span>Canvases</span>
-        <button class="ls-canvas-rail-new" id="ls-canvas-new" title="New canvas">+</button>
+      <div class="ls-canvas-tabs">
+        <button class="ls-canvas-tab active" data-tab="canvases">Canvases</button>
+        <button class="ls-canvas-tab" data-tab="photos">Photos</button>
       </div>
-      <div class="ls-canvas-rail-list" id="ls-canvas-list"></div>
+      <div class="ls-canvas-tab-panel" data-panel="canvases">
+        <div class="ls-canvas-rail-h">
+          <span>Saved</span>
+          <button class="ls-canvas-rail-new" id="ls-canvas-new" title="New canvas">+</button>
+        </div>
+        <div class="ls-canvas-rail-list" id="ls-canvas-list"></div>
+      </div>
+      <div class="ls-canvas-tab-panel" data-panel="photos" style="display:none;">
+        <div class="ls-canvas-rail-h">
+          <span>Photos</span>
+          <button class="ls-canvas-rail-new" id="ls-photos-pick" title="Pick a folder">…</button>
+          <button class="ls-canvas-rail-new" id="ls-photos-refresh" title="Refresh"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg></button>
+        </div>
+        <div class="ls-photos-folder" id="ls-photos-folder"></div>
+        <div class="ls-photos-grid" id="ls-photos-grid"></div>
+        <div class="ls-photos-empty" id="ls-photos-empty" style="display:none;"></div>
+      </div>
     </div>
     <div class="ls-canvas-main">
       <div class="ls-canvas-toolbar" id="ls-canvas-toolbar">
