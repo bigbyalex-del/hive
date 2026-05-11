@@ -23,6 +23,7 @@ import { listAlerts as dbListAlerts, setAlertStatus, deleteAlertRow, reconcileSt
 import { extractIntent as deployExtractIntent, preparePlan as deployPreparePlan, executePlan as deployExecutePlan, rollback as deployRollback, deployHistory } from './deploy';
 import { getPulse as pulseGet, markPulseSeen as pulseMarkSeen } from './pulse';
 import { listChatsForPersona, previewByPersona } from './db';
+import { insertAction, listActions as dbListActions, getAction as dbGetAction, updateAction as dbUpdateAction, deleteAction as dbDeleteAction } from './db';
 import { listDrafts as draftsList, openDraftFolderInExplorer, openHeroInPlayer } from './drafts';
 import { generateNextDraft as pipelineGenerate, getQueueSummary as pipelineGetQueue } from './contentPipeline';
 
@@ -407,12 +408,85 @@ app.whenReady().then(async () => {
     }
   });
 
-  ipcMain.handle(IPC.ExtractActions, async (_e, payload: { question: string; reply: string; personaName: string }) => {
+  ipcMain.handle(IPC.ExtractActions, async (_e, payload: { question: string; reply: string; personaName: string; personaId?: string }) => {
     try {
       const actions = await extractActions(payload.question, payload.reply, payload.personaName);
+      const projectId = getActiveProjectId();
+      const persisted = actions.map(a => {
+        const id = insertAction({
+          content: a.summary,
+          personaId: payload.personaId ?? null,
+          projectId,
+          priority: a.urgency === 'high' ? 'high' : a.urgency === 'low' ? 'low' : 'medium',
+          sourceQuestion: payload.question.slice(0, 500),
+        });
+        return { id, ...a };
+      });
+      return { ok: true, actions: persisted };
+    } catch (err: any) {
+      return { ok: false, error: err?.message ?? String(err), actions: [] };
+    }
+  });
+
+  ipcMain.handle(IPC.ListActions, (_e, opts: { status?: string; projectId?: number | null; limit?: number } = {}) => {
+    try {
+      const actions = dbListActions({ status: (opts.status as any) ?? 'active', projectId: opts.projectId ?? null, limit: opts.limit ?? 200 });
       return { ok: true, actions };
     } catch (err: any) {
       return { ok: false, error: err?.message ?? String(err), actions: [] };
+    }
+  });
+
+  ipcMain.handle(IPC.CreateAction, (_e, input: { content: string; personaId?: string | null; projectId?: number | null; priority?: string; status?: string; sourceChatId?: number | null; sourceQuestion?: string | null }) => {
+    try {
+      if (!input.content?.trim()) return { ok: false, error: 'content required' };
+      const id = insertAction({
+        content: input.content.trim().slice(0, 500),
+        personaId: input.personaId ?? null,
+        projectId: input.projectId ?? getActiveProjectId(),
+        priority: (input.priority as any) ?? 'medium',
+        status: (input.status as any) ?? 'todo',
+        sourceChatId: input.sourceChatId ?? null,
+        sourceQuestion: input.sourceQuestion ?? null,
+      });
+      return { ok: true, id };
+    } catch (err: any) {
+      return { ok: false, error: err?.message ?? String(err) };
+    }
+  });
+
+  ipcMain.handle(IPC.UpdateAction, (_e, payload: { id: number; patch: any }) => {
+    try {
+      dbUpdateAction(payload.id, payload.patch ?? {});
+      return { ok: true, action: dbGetAction(payload.id) };
+    } catch (err: any) {
+      return { ok: false, error: err?.message ?? String(err) };
+    }
+  });
+
+  ipcMain.handle(IPC.UpdateActionStatus, (_e, payload: { id: number; status: string }) => {
+    try {
+      dbUpdateAction(payload.id, { status: payload.status as any });
+      return { ok: true, action: dbGetAction(payload.id) };
+    } catch (err: any) {
+      return { ok: false, error: err?.message ?? String(err) };
+    }
+  });
+
+  ipcMain.handle(IPC.DeleteAction, (_e, id: number) => {
+    try {
+      dbDeleteAction(id);
+      return { ok: true };
+    } catch (err: any) {
+      return { ok: false, error: err?.message ?? String(err) };
+    }
+  });
+
+  ipcMain.handle(IPC.GetAction, (_e, id: number) => {
+    try {
+      return { ok: true, action: dbGetAction(id) };
+    } catch (err: any) {
+      return { ok: false, error: err?.message ?? String(err), action: null };
     }
   });
 

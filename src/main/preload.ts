@@ -71,6 +71,12 @@ const IPC = {
   GenerateNextDraft: 'hive:generate-next-draft',
   GetContentQueue: 'hive:get-content-queue',
   ContentDraftProgress: 'hive:content-draft-progress',
+  ListActions: 'hive:list-actions',
+  CreateAction: 'hive:create-action',
+  UpdateAction: 'hive:update-action',
+  UpdateActionStatus: 'hive:update-action-status',
+  DeleteAction: 'hive:delete-action',
+  GetAction: 'hive:get-action',
 };
 
 contextBridge.exposeInMainWorld('hive', {
@@ -183,4 +189,12 @@ contextBridge.exposeInMainWorld('hive', {
     ipcRenderer.on(IPC.AgentEvent, listener);
     return () => ipcRenderer.removeListener(IPC.AgentEvent, listener);
   },
+  listActions: (opts?: { status?: string; projectId?: number | null; limit?: number }) =>
+    ipcRenderer.invoke(IPC.ListActions, opts ?? {}),
+  createAction: (input: { content: string; personaId?: string | null; projectId?: number | null; priority?: string; status?: string; sourceChatId?: number | null; sourceQuestion?: string | null }) =>
+    ipcRenderer.invoke(IPC.CreateAction, input),
+  updateAction: (id: number, patch: any) => ipcRenderer.invoke(IPC.UpdateAction, { id, patch }),
+  updateActionStatus: (id: number, status: string) => ipcRenderer.invoke(IPC.UpdateActionStatus, { id, status }),
+  deleteAction: (id: number) => ipcRenderer.invoke(IPC.DeleteAction, id),
+  getAction: (id: number) => ipcRenderer.invoke(IPC.GetAction, id),
 });

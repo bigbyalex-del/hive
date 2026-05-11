@@ -143,6 +143,21 @@ export async function initDb(): Promise<void> {
     );
     CREATE INDEX IF NOT EXISTS idx_chats_persona_ts ON chats(persona_id, ts);
     CREATE INDEX IF NOT EXISTS idx_chats_ts ON chats(ts);
+
+    CREATE TABLE IF NOT EXISTS actions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ts INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      persona_id TEXT,
+      project_id INTEGER,
+      content TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'todo',
+      priority TEXT NOT NULL DEFAULT 'medium',
+      source_chat_id INTEGER,
+      source_question TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_actions_status ON actions(status, updated_at);
+    CREATE INDEX IF NOT EXISTS idx_actions_project ON actions(project_id, status);
   `);
 
   // Lightweight migrations — sql.js doesn't fail on duplicate ALTER, but we
@@ -466,6 +481,134 @@ export function setAlertStatus(id: number, status: AlertRow['status']): void {
 export function deleteAlertRow(id: number): void {
   if (!db) return;
   const stmt = db.prepare('DELETE FROM alerts WHERE id = ?');
+  stmt.run([id]);
+  stmt.free();
+  scheduleSave();
+}
+
+// ---- Actions ----------------------------------------------------------
+//
+// Concrete to-dos extracted from advisor replies (extractActions in
+// advisors.ts) plus anything Alex creates manually from the Linear-style
+// Actions view. status lifecycle: todo → in_progress → in_review → done
+// (or → blocked at any point). priority is urgent/high/medium/low.
+
+export type ActionStatus = 'todo' | 'in_progress' | 'in_review' | 'done' | 'blocked';
+export type ActionPriority = 'urgent' | 'high' | 'medium' | 'low';
+
+export interface ActionRow {
+  id: number;
+  ts: number;
+  updatedAt: number;
+  personaId: string | null;
+  projectId: number | null;
+  content: string;
+  status: ActionStatus;
+  priority: ActionPriority;
+  sourceChatId: number | null;
+  sourceQuestion: string | null;
+}
+
+export interface InsertActionOpts {
+  content: string;
+  personaId?: string | null;
+  projectId?: number | null;
+  priority?: ActionPriority;
+  status?: ActionStatus;
+  sourceChatId?: number | null;
+  sourceQuestion?: string | null;
+}
+
+export function insertAction(opts: InsertActionOpts): number | null {
+  if (!db) return null;
+  const ts = Date.now();
+  const stmt = db.prepare(`
+    INSERT INTO actions (ts, updated_at, persona_id, project_id, content, status, priority, source_chat_id, source_question)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  stmt.run([
+    ts,
+    ts,
+    opts.personaId ?? null,
+    opts.projectId ?? null,
+    opts.content,
+    opts.status ?? 'todo',
+    opts.priority ?? 'medium',
+    opts.sourceChatId ?? null,
+    opts.sourceQuestion ?? null,
+  ]);
+  stmt.free();
+  const idResult = db.exec('SELECT last_insert_rowid() AS id');
+  const id = idResult[0]?.values?.[0]?.[0] as number | undefined;
+  scheduleSave();
+  return typeof id === 'number' ? id : null;
+}
+
+function rowToAction(row: any[]): ActionRow {
+  return {
+    id: row[0] as number,
+    ts: row[1] as number,
+    updatedAt: row[2] as number,
+    personaId: (row[3] ?? null) as string | null,
+    projectId: (row[4] ?? null) as number | null,
+    content: row[5] as string,
+    status: row[6] as ActionStatus,
+    priority: row[7] as ActionPriority,
+    sourceChatId: (row[8] ?? null) as number | null,
+    sourceQuestion: (row[9] ?? null) as string | null,
+  };
+}
+
+export function listActions(opts: { status?: ActionStatus | 'active' | 'all'; projectId?: number | null; limit?: number } = {}): ActionRow[] {
+  if (!db) return [];
+  const status = opts.status ?? 'active';
+  const args: any[] = [];
+  const where: string[] = [];
+  if (status === 'active') { where.push("status IN ('todo','in_progress','in_review','blocked')"); }
+  else if (status !== 'all') { where.push('status = ?'); args.push(status); }
+  if (opts.projectId != null) { where.push('project_id = ?'); args.push(opts.projectId); }
+  const sql = `SELECT id, ts, updated_at, persona_id, project_id, content, status, priority, source_chat_id, source_question
+               FROM actions ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+               ORDER BY updated_at DESC LIMIT ${Math.max(1, Math.min(500, opts.limit ?? 200))}`;
+  const stmt = db.prepare(sql);
+  if (args.length) stmt.bind(args);
+  const out: ActionRow[] = [];
+  while (stmt.step()) out.push(rowToAction(stmt.get()));
+  stmt.free();
+  return out;
+}
+
+export function getAction(id: number): ActionRow | null {
+  if (!db) return null;
+  const stmt = db.prepare(`SELECT id, ts, updated_at, persona_id, project_id, content, status, priority, source_chat_id, source_question FROM actions WHERE id = ?`);
+  stmt.bind([id]);
+  if (!stmt.step()) { stmt.free(); return null; }
+  const row = rowToAction(stmt.get());
+  stmt.free();
+  return row;
+}
+
+export function updateAction(id: number, patch: Partial<Pick<ActionRow, 'content' | 'status' | 'priority' | 'personaId' | 'projectId'>>): void {
+  if (!db) return;
+  const fields: string[] = [];
+  const args: any[] = [];
+  if (patch.content !== undefined) { fields.push('content = ?'); args.push(patch.content); }
+  if (patch.status !== undefined) { fields.push('status = ?'); args.push(patch.status); }
+  if (patch.priority !== undefined) { fields.push('priority = ?'); args.push(patch.priority); }
+  if (patch.personaId !== undefined) { fields.push('persona_id = ?'); args.push(patch.personaId); }
+  if (patch.projectId !== undefined) { fields.push('project_id = ?'); args.push(patch.projectId); }
+  if (!fields.length) return;
+  fields.push('updated_at = ?'); args.push(Date.now());
+  args.push(id);
+  const stmt = db.prepare(`UPDATE actions SET ${fields.join(', ')} WHERE id = ?`);
+  stmt.run(args);
+  stmt.free();
+  scheduleSave();
+}
+
+export function deleteAction(id: number): void {
+  if (!db) return;
+  const stmt = db.prepare('DELETE FROM actions WHERE id = ?');
   stmt.run([id]);
   stmt.free();
   scheduleSave();

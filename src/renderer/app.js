@@ -3501,4 +3501,580 @@ window.__extractActionsFor = async (personaId, question, reply) => {
   if (_origExtractActionsFor) await _origExtractActionsFor(personaId, question, reply);
   if (personaId === 'fxv:manager') setTimeout(attachLeadSynthesis, 200);
   refreshPulse();
+  if (window.__lsRefreshActions) window.__lsRefreshActions();
 };
+
+// ════════════════════════════════════════════════════════════════════
+// LINEAR SHELL (v3.0-α)
+// Sidebar + topbar + Actions list + detail rail.
+// Only initialises when body.mode-linear is set; the legacy shell
+// continues to bootstrap above untouched.
+// ════════════════════════════════════════════════════════════════════
+(function linearShell() {
+  const root = document.querySelector('.linear-shell');
+  if (!root) return;
+
+  const PERSONA_DOT = {
+    'fxv:aerobic':    '#6BBF7B',
+    'fxv:strength':   '#E07B5F',
+    'fxv:concurrent': '#D4A574',
+    'fxv:load':       '#B7AFE0',
+    'fxv:readiness':  '#6BB1D6',
+    'fxv:coach':      '#C77DD9',
+    'fxv:uiux':       '#E8C39C',
+    'fxv:marketing':  '#F2D26A',
+    'fxv:manager':    '#FFFFFF',
+    'page:today':     '#9CB4D6',
+    'page:programme': '#D4A574',
+    'page:coach':     '#C77DD9',
+    'page:health':    '#6BBF7B',
+  };
+  const PROJECT_DOT = {
+    'fxv':  '#D4A574',
+    'maths': '#8AC4D6',
+    'hive': '#B7AFE0',
+  };
+
+  const STATUS_GROUPS = [
+    { key: 'in_progress', label: 'In progress' },
+    { key: 'in_review',   label: 'In review' },
+    { key: 'todo',        label: 'Todo' },
+    { key: 'blocked',     label: 'Blocked' },
+    { key: 'done',        label: 'Done' },
+  ];
+  const PRIORITY_ABBR = { urgent: 'Ur', high: 'Hi', medium: 'Md', low: 'Lo' };
+
+  let actions = [];
+  let advisors = [];
+  let projects = [];
+  let activeProjectId = null;
+  let activeView = 'actions';
+  let selectedActionId = null;
+  let filter = { status: 'active', personaId: null, projectId: null, priority: null };
+
+  function relTime(ts) {
+    const s = Math.floor((Date.now() - ts) / 1000);
+    if (s < 60) return 'just now';
+    if (s < 3600) return Math.floor(s / 60) + 'm';
+    if (s < 86400) return Math.floor(s / 3600) + 'h';
+    if (s < 86400 * 7) return Math.floor(s / 86400) + 'd';
+    return new Date(ts).toLocaleDateString();
+  }
+
+  function escapeHtml(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+  }
+
+  function personaName(id) {
+    if (!id) return null;
+    const a = advisors.find(x => x.id === id);
+    return a?.name ?? id.split(':').pop();
+  }
+  function personaColor(id) { return PERSONA_DOT[id] || '#8A8F98'; }
+
+  function projectName(id) {
+    if (id == null) return null;
+    const p = projects.find(x => x.id === id);
+    return p?.name ?? `Project ${id}`;
+  }
+  function projectColor(p) {
+    const k = (p?.slug || p?.name || '').toLowerCase();
+    if (k.includes('fxv')) return PROJECT_DOT.fxv;
+    if (k.includes('maths')) return PROJECT_DOT.maths;
+    if (k.includes('hive')) return PROJECT_DOT.hive;
+    return '#8A8F98';
+  }
+
+  async function refreshSidebar() {
+    try {
+      const adv = await window.hive.listAdvisors();
+      advisors = (adv?.advisors ?? adv ?? []).filter(a => a && a.id);
+    } catch { advisors = []; }
+    try {
+      const pr = await window.hive.listProjects();
+      projects = pr?.projects ?? pr ?? [];
+      const ap = await window.hive.getActiveProject();
+      activeProjectId = ap?.id ?? ap?.activeProjectId ?? null;
+    } catch { projects = []; }
+
+    const wsName = document.getElementById('ls-ws-name');
+    const active = projects.find(p => p.id === activeProjectId);
+    if (wsName && active) wsName.textContent = active.name;
+
+    const projList = document.getElementById('ls-projects-list');
+    if (projList) {
+      projList.innerHTML = projects.map(p => `
+        <div class="ls-nav-item" data-project="${p.id}">
+          <span class="ls-persona-dot" style="background:${projectColor(p)};"></span>
+          <span>${escapeHtml(p.name)}</span>
+        </div>
+      `).join('') || '<div style="padding:4px 8px;color:var(--ls-text-faint);font-size:11px;">No projects yet</div>';
+      projList.querySelectorAll('[data-project]').forEach(el => {
+        el.addEventListener('click', async () => {
+          const id = Number(el.dataset.project);
+          await window.hive.switchProject(id);
+          await refreshSidebar();
+          await refreshActions();
+        });
+      });
+    }
+
+    const personaList = document.getElementById('ls-personas-list');
+    if (personaList) {
+      const specialists = advisors.filter(a => !a.id.startsWith('page:') && a.id !== 'fxv:manager');
+      const lead = advisors.find(a => a.id === 'fxv:manager');
+      const pages = advisors.filter(a => a.id.startsWith('page:'));
+      const renderRow = a => `
+        <div class="ls-nav-item" data-persona="${a.id}">
+          <span class="ls-persona-dot" style="background:${personaColor(a.id)};"></span>
+          <span>${escapeHtml(a.name)}</span>
+        </div>`;
+      personaList.innerHTML =
+        (lead ? renderRow(lead) : '') +
+        specialists.map(renderRow).join('') +
+        (pages.length ? '<div class="ls-nav-h" style="padding-top:10px;">Page agents</div>' + pages.map(renderRow).join('') : '');
+      personaList.querySelectorAll('[data-persona]').forEach(el => {
+        el.addEventListener('click', () => {
+          filter.personaId = filter.personaId === el.dataset.persona ? null : el.dataset.persona;
+          renderFilterChips();
+          renderList();
+        });
+      });
+    }
+  }
+
+  async function refreshActions() {
+    try {
+      const res = await window.hive.listActions({ status: filter.status, projectId: filter.projectId, limit: 300 });
+      actions = res?.actions ?? [];
+    } catch { actions = []; }
+    renderList();
+    updateCounts();
+  }
+  window.__lsRefreshActions = refreshActions;
+
+  function updateCounts() {
+    const el = document.getElementById('ls-count-actions');
+    if (el) el.textContent = String(actions.filter(a => a.status !== 'done').length);
+    const inbox = document.getElementById('ls-count-inbox');
+    if (inbox) inbox.textContent = String(actions.filter(a => a.status === 'todo').length);
+    const backlog = document.getElementById('ls-count-backlog');
+    if (backlog) backlog.textContent = String(actions.filter(a => a.status === 'todo' || a.status === 'blocked').length);
+  }
+
+  function renderFilterChips() {
+    const bar = document.getElementById('ls-filterbar');
+    if (!bar) return;
+    const chips = [];
+    const statusLabels = { active: 'Active', all: 'All', todo: 'Todo', in_progress: 'In progress', in_review: 'In review', done: 'Done', blocked: 'Blocked' };
+    chips.push(`<div class="ls-chip set" data-filter="status">Status: ${statusLabels[filter.status] || filter.status} <span class="ls-x">×</span></div>`);
+    if (filter.personaId) {
+      chips.push(`<div class="ls-chip set" data-filter="persona"><span class="ls-pdot" style="background:${personaColor(filter.personaId)};display:inline-block;width:6px;height:6px;border-radius:50%;"></span> ${escapeHtml(personaName(filter.personaId))} <span class="ls-x">×</span></div>`);
+    } else {
+      chips.push(`<div class="ls-chip" data-filter="persona">Persona</div>`);
+    }
+    if (filter.projectId) {
+      const p = projects.find(x => x.id === filter.projectId);
+      chips.push(`<div class="ls-chip set" data-filter="project"><span class="ls-pdot" style="background:${projectColor(p)};display:inline-block;width:6px;height:6px;border-radius:50%;"></span> ${escapeHtml(p?.name ?? '')} <span class="ls-x">×</span></div>`);
+    } else {
+      chips.push(`<div class="ls-chip" data-filter="project">Project</div>`);
+    }
+    if (filter.priority) {
+      chips.push(`<div class="ls-chip set" data-filter="priority">Priority: ${filter.priority} <span class="ls-x">×</span></div>`);
+    } else {
+      chips.push(`<div class="ls-chip" data-filter="priority">Priority</div>`);
+    }
+    const spacer = '<div class="ls-spacer"></div>';
+    const count = `<div class="ls-count-pill" id="ls-list-count">${actions.length} action${actions.length === 1 ? '' : 's'}</div>`;
+    bar.innerHTML = chips.join('') + spacer + count;
+    bar.querySelectorAll('[data-filter]').forEach(el => {
+      el.addEventListener('click', evt => {
+        const which = el.dataset.filter;
+        if (evt.target.classList.contains('ls-x')) {
+          if (which === 'status') filter.status = 'all';
+          else if (which === 'persona') filter.personaId = null;
+          else if (which === 'project') filter.projectId = null;
+          else if (which === 'priority') filter.priority = null;
+          refreshActions();
+          renderFilterChips();
+          return;
+        }
+        cycleFilter(which);
+      });
+    });
+  }
+
+  function cycleFilter(which) {
+    if (which === 'status') {
+      const order = ['active', 'todo', 'in_progress', 'in_review', 'blocked', 'done', 'all'];
+      filter.status = order[(order.indexOf(filter.status) + 1) % order.length];
+      refreshActions();
+      renderFilterChips();
+    } else if (which === 'priority') {
+      const order = [null, 'urgent', 'high', 'medium', 'low'];
+      filter.priority = order[(order.indexOf(filter.priority) + 1) % order.length];
+      renderList();
+      renderFilterChips();
+    } else if (which === 'project') {
+      const ids = [null, ...projects.map(p => p.id)];
+      filter.projectId = ids[(ids.indexOf(filter.projectId) + 1) % ids.length];
+      refreshActions();
+      renderFilterChips();
+    } else if (which === 'persona') {
+      const ids = [null, ...advisors.map(a => a.id)];
+      filter.personaId = ids[(ids.indexOf(filter.personaId) + 1) % ids.length];
+      renderList();
+      renderFilterChips();
+    }
+  }
+
+  function passesFilter(a) {
+    if (filter.personaId && a.personaId !== filter.personaId) return false;
+    if (filter.priority && a.priority !== filter.priority) return false;
+    return true;
+  }
+
+  function renderList() {
+    const list = document.getElementById('ls-list');
+    if (!list) return;
+    const visible = actions.filter(passesFilter);
+    const countEl = document.getElementById('ls-list-count');
+    if (countEl) countEl.textContent = `${visible.length} action${visible.length === 1 ? '' : 's'}`;
+
+    if (!visible.length) {
+      list.innerHTML = `<div class="ls-empty"><div class="ls-empty-title">No actions match</div><div class="ls-empty-sub">Adjust filters or chat with an advisor to surface new ones.</div></div>`;
+      return;
+    }
+
+    const groups = STATUS_GROUPS.map(g => ({ ...g, items: visible.filter(a => a.status === g.key) })).filter(g => g.items.length);
+    list.innerHTML = groups.map(g => {
+      const groupDot = statusDotMarkup(g.key, true);
+      const rows = g.items.map(a => rowMarkup(a)).join('');
+      return `
+        <div class="ls-group-h">${groupDot}<span>${g.label}</span><span class="ls-group-count">${g.items.length}</span></div>
+        ${rows}
+      `;
+    }).join('');
+
+    list.querySelectorAll('[data-action-id]').forEach(el => {
+      const id = Number(el.dataset.actionId);
+      el.addEventListener('click', evt => {
+        if (evt.target.closest('[data-toggle-status]')) return;
+        selectedActionId = id;
+        renderList();
+        renderDetail();
+      });
+      el.querySelectorAll('[data-toggle-status]').forEach(s => {
+        s.addEventListener('click', async evt => {
+          evt.stopPropagation();
+          const a = actions.find(x => x.id === id);
+          if (!a) return;
+          const next = a.status === 'done' ? 'todo' : 'done';
+          await window.hive.updateActionStatus(id, next);
+          await refreshActions();
+          if (selectedActionId === id) renderDetail();
+        });
+      });
+    });
+  }
+
+  function statusDotMarkup(status, asGroupDot = false) {
+    const cls = asGroupDot ? `ls-sdot ${status}` : `ls-sdot ${status}`;
+    return `<span class="${cls}" data-toggle-status></span>`;
+  }
+
+  function rowMarkup(a) {
+    const persona = a.personaId ? `<div class="ls-meta-pill"><span class="ls-pdot" style="background:${personaColor(a.personaId)};"></span> ${escapeHtml(personaName(a.personaId) ?? '—')}</div>` : '<div></div>';
+    const proj = a.projectId ? `<div class="ls-meta-pill"><span class="ls-pdot" style="background:${projectColor(projects.find(p => p.id === a.projectId))};"></span> ${escapeHtml(projectName(a.projectId) ?? '—')}</div>` : '<div></div>';
+    const prio = `<div class="ls-prio ${a.priority}">${PRIORITY_ABBR[a.priority] || ''}</div>`;
+    const sel = a.id === selectedActionId ? ' sel' : '';
+    return `
+      <div class="ls-row${sel}" data-action-id="${a.id}">
+        <div class="ls-id">HIV-${String(a.id).padStart(3, '0')}</div>
+        ${statusDotMarkup(a.status)}
+        <div class="ls-title">${escapeHtml(a.content)}</div>
+        ${persona}
+        ${proj}
+        ${prio}
+        <div class="ls-updated">${relTime(a.updatedAt)}</div>
+      </div>
+    `;
+  }
+
+  function renderDetail() {
+    const empty = document.getElementById('ls-detail-empty');
+    const body = document.getElementById('ls-detail-body');
+    if (!empty || !body) return;
+    const a = actions.find(x => x.id === selectedActionId);
+    if (!a) { empty.style.display = ''; body.style.display = 'none'; return; }
+    empty.style.display = 'none';
+    body.style.display = '';
+    const persona = personaName(a.personaId);
+    const proj = projectName(a.projectId);
+    const sourceQ = a.sourceQuestion ? `<div class="ls-d-src"><div class="src-h">Source · advisor question</div>${escapeHtml(a.sourceQuestion)}</div>` : '';
+
+    body.innerHTML = `
+      <div class="ls-d-id">HIV-${String(a.id).padStart(3, '0')} · created ${relTime(a.ts)}</div>
+      <div class="ls-d-title">${escapeHtml(a.content)}</div>
+
+      <div class="ls-d-prop"><div class="k">Status</div>
+        <div class="v editable" data-edit="status">${statusDotMarkup(a.status)} ${statusLabel(a.status)}</div></div>
+      <div class="ls-d-prop"><div class="k">Priority</div>
+        <div class="v editable" data-edit="priority" style="color:${priorityColor(a.priority)};">${a.priority.charAt(0).toUpperCase() + a.priority.slice(1)}</div></div>
+      <div class="ls-d-prop"><div class="k">Persona</div>
+        <div class="v">${persona ? `<span class="ls-persona-dot" style="background:${personaColor(a.personaId)};"></span> ${escapeHtml(persona)}` : '<span style="color:var(--ls-text-faint);">—</span>'}</div></div>
+      <div class="ls-d-prop"><div class="k">Project</div>
+        <div class="v">${proj ? `<span class="ls-persona-dot" style="background:${projectColor(projects.find(p => p.id === a.projectId))};"></span> ${escapeHtml(proj)}` : '<span style="color:var(--ls-text-faint);">—</span>'}</div></div>
+      <div class="ls-d-prop"><div class="k">Updated</div>
+        <div class="v"><span style="font-family:'JetBrains Mono',monospace;">${relTime(a.updatedAt)}</span></div></div>
+
+      <div class="ls-d-sep"></div>
+      ${sourceQ}
+
+      <div class="ls-d-actions">
+        <button class="ls-btn primary" data-act="done">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+          ${a.status === 'done' ? 'Reopen' : 'Mark done'}
+        </button>
+        ${a.personaId ? `<button class="ls-btn" data-act="open-chat">Open chat</button>` : ''}
+        <button class="ls-btn danger" data-act="delete">Delete</button>
+      </div>
+    `;
+
+    body.querySelector('[data-edit="status"]')?.addEventListener('click', () => cycleActionStatus(a.id));
+    body.querySelector('[data-edit="priority"]')?.addEventListener('click', () => cycleActionPriority(a.id));
+    body.querySelector('[data-act="done"]')?.addEventListener('click', async () => {
+      await window.hive.updateActionStatus(a.id, a.status === 'done' ? 'todo' : 'done');
+      await refreshActions();
+      renderDetail();
+    });
+    body.querySelector('[data-act="delete"]')?.addEventListener('click', async () => {
+      await window.hive.deleteAction(a.id);
+      selectedActionId = null;
+      await refreshActions();
+      renderDetail();
+    });
+  }
+
+  function statusLabel(s) { return ({ todo: 'Todo', in_progress: 'In progress', in_review: 'In review', done: 'Done', blocked: 'Blocked' })[s] || s; }
+  function priorityColor(p) { return ({ urgent: '#EB5757', high: '#E2A03F', medium: '#8A8F98', low: '#5D6068' })[p] || '#8A8F98'; }
+
+  async function cycleActionStatus(id) {
+    const a = actions.find(x => x.id === id);
+    if (!a) return;
+    const order = ['todo', 'in_progress', 'in_review', 'done', 'blocked'];
+    const next = order[(order.indexOf(a.status) + 1) % order.length];
+    await window.hive.updateActionStatus(id, next);
+    await refreshActions();
+    renderDetail();
+  }
+  async function cycleActionPriority(id) {
+    const a = actions.find(x => x.id === id);
+    if (!a) return;
+    const order = ['low', 'medium', 'high', 'urgent'];
+    const next = order[(order.indexOf(a.priority) + 1) % order.length];
+    await window.hive.updateAction(id, { priority: next });
+    await refreshActions();
+    renderDetail();
+  }
+
+  function openNewActionForm() {
+    const bar = document.getElementById('ls-newaction');
+    const input = document.getElementById('ls-newaction-input');
+    const personaSel = document.getElementById('ls-newaction-persona');
+    if (!bar || !input || !personaSel) return;
+    personaSel.innerHTML = '<option value="">No persona</option>' + advisors.map(a => `<option value="${a.id}">${escapeHtml(a.name)}</option>`).join('');
+    bar.style.display = '';
+    input.value = '';
+    document.getElementById('ls-newaction-priority').value = 'medium';
+    personaSel.value = filter.personaId ?? '';
+    setTimeout(() => input.focus(), 0);
+  }
+  function closeNewActionForm() {
+    const bar = document.getElementById('ls-newaction');
+    if (bar) bar.style.display = 'none';
+  }
+  async function saveNewAction() {
+    const input = document.getElementById('ls-newaction-input');
+    const priority = document.getElementById('ls-newaction-priority').value;
+    const personaId = document.getElementById('ls-newaction-persona').value || null;
+    const content = (input?.value ?? '').trim();
+    if (!content) { input?.focus(); return; }
+    await window.hive.createAction({ content, priority, personaId, projectId: activeProjectId });
+    closeNewActionForm();
+    await refreshActions();
+  }
+  function createInlineAction() { openNewActionForm(); }
+
+  document.getElementById('ls-newaction-save')?.addEventListener('click', saveNewAction);
+  document.getElementById('ls-newaction-cancel')?.addEventListener('click', closeNewActionForm);
+  document.getElementById('ls-newaction-input')?.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); saveNewAction(); }
+    else if (e.key === 'Escape') { closeNewActionForm(); }
+  });
+
+  // Cost readout — reuse the existing getCostSummary IPC.
+  async function refreshCost() {
+    try {
+      const res = await window.hive.getCostSummary(activeProjectId);
+      const val = (res?.todayGBP ?? res?.today ?? 0).toFixed(2);
+      const el = document.getElementById('ls-cost-val');
+      if (el) el.textContent = val;
+    } catch {}
+  }
+
+  // Sidebar nav clicks — only Actions wired in v3.0-α.
+  function setActiveNav(view) {
+    activeView = view;
+    document.querySelectorAll('.linear-shell .ls-nav-item[data-view]').forEach(el => {
+      el.classList.toggle('active', el.dataset.view === view);
+    });
+    const leaf = document.getElementById('ls-crumb-leaf');
+    if (leaf) leaf.textContent = ({
+      actions: 'Actions', inbox: 'Inbox', backlog: 'Backlog',
+      specialists: 'Specialists', pulse: 'Pulse', drafts: 'Drafts',
+      deploys: 'Deploys', alerts: 'Alerts', council: 'Council',
+      'ship-audit': 'Ship audit', canvas: 'Canvas',
+    })[view] || view;
+  }
+
+  document.querySelectorAll('.linear-shell .ls-nav-item[data-view]').forEach(el => {
+    el.addEventListener('click', () => {
+      const v = el.dataset.view;
+      if (v === 'inbox') { filter.status = 'todo'; setActiveNav('inbox'); refreshActions(); renderFilterChips(); return; }
+      if (v === 'backlog') { filter.status = 'todo'; setActiveNav('backlog'); refreshActions(); renderFilterChips(); return; }
+      if (v === 'actions') { filter.status = 'active'; setActiveNav('actions'); refreshActions(); renderFilterChips(); return; }
+      // Other views not yet implemented — palette-toast them in.
+      flashToast(`${el.dataset.view} view ships in a later slice. Use Ctrl-K → "switch to legacy" for now.`);
+    });
+  });
+
+  document.getElementById('ls-new-action')?.addEventListener('click', createInlineAction);
+
+  // Cost click → open existing legacy cost modal by toggling to legacy briefly.
+  document.getElementById('ls-cost')?.addEventListener('click', () => {
+    document.body.classList.remove('mode-linear');
+    document.body.classList.add('mode-fxv-advise');
+    const wrap = document.getElementById('meta-cost-wrap');
+    if (wrap) wrap.click();
+  });
+
+  // ── Command palette ──────────────────────────────────────────────
+  const palette = document.getElementById('ls-cmdpalette');
+  const paletteInput = document.getElementById('ls-cmdpalette-input');
+  const paletteList = document.getElementById('ls-cmdpalette-list');
+  const COMMANDS = [
+    { id: 'new-action', label: 'New action', hint: 'N', run: createInlineAction },
+    { id: 'switch-legacy', label: 'Switch to legacy shell', hint: '', run: switchToLegacy },
+    { id: 'filter-active', label: 'Show active actions', hint: '', run: () => { filter.status = 'active'; refreshActions(); renderFilterChips(); } },
+    { id: 'filter-todo', label: 'Show todo only', hint: '', run: () => { filter.status = 'todo'; refreshActions(); renderFilterChips(); } },
+    { id: 'filter-done', label: 'Show done only', hint: '', run: () => { filter.status = 'done'; refreshActions(); renderFilterChips(); } },
+    { id: 'filter-clear', label: 'Clear filters', hint: '', run: () => { filter = { status: 'active', personaId: null, projectId: null, priority: null }; refreshActions(); renderFilterChips(); } },
+    { id: 'run-council', label: 'Run Council', hint: '', run: switchToLegacyThen('open-council') },
+    { id: 'run-ship-audit', label: 'Run Ship Audit', hint: '', run: switchToLegacyThen('open-ship-audit') },
+    { id: 'refresh-seeds', label: 'Refresh memory (re-embed)', hint: '', run: switchToLegacyThen('refresh-seeds') },
+    { id: 'generate-draft', label: 'Generate next draft', hint: '', run: switchToLegacyThen('generate-draft') },
+    { id: 'open-deploy', label: 'Open deploy modal', hint: '', run: switchToLegacyThen('open-deploy') },
+    { id: 'open-babysit', label: 'Open babysit', hint: '', run: switchToLegacyThen('open-babysit') },
+  ];
+
+  function switchToLegacy() {
+    document.body.classList.remove('mode-linear');
+    document.body.classList.add('mode-fxv-advise');
+  }
+  function switchToLegacyThen(elementId) {
+    return () => {
+      switchToLegacy();
+      setTimeout(() => document.getElementById(elementId)?.click(), 50);
+    };
+  }
+
+  let paletteIndex = 0;
+  function openPalette() {
+    palette.style.display = '';
+    paletteInput.value = '';
+    paletteIndex = 0;
+    renderPalette('');
+    setTimeout(() => paletteInput.focus(), 0);
+  }
+  function closePalette() { palette.style.display = 'none'; }
+  function renderPalette(q) {
+    const ql = q.toLowerCase();
+    const matches = COMMANDS.filter(c => c.label.toLowerCase().includes(ql));
+    paletteList.innerHTML = matches.map((c, i) =>
+      `<div class="ls-cmdpalette-item${i === paletteIndex ? ' sel' : ''}" data-id="${c.id}">
+        <span>${escapeHtml(c.label)}</span>
+        ${c.hint ? `<span class="ls-cmdpalette-hint">${c.hint}</span>` : ''}
+      </div>`
+    ).join('') || '<div class="ls-cmdpalette-item" style="color:var(--ls-text-faint);">No matches</div>';
+    paletteList.querySelectorAll('[data-id]').forEach(el => {
+      el.addEventListener('click', () => {
+        const cmd = COMMANDS.find(c => c.id === el.dataset.id);
+        closePalette();
+        cmd?.run();
+      });
+    });
+  }
+  paletteInput?.addEventListener('input', e => { paletteIndex = 0; renderPalette(e.target.value); });
+  paletteInput?.addEventListener('keydown', e => {
+    const q = paletteInput.value.toLowerCase();
+    const matches = COMMANDS.filter(c => c.label.toLowerCase().includes(q));
+    if (e.key === 'Escape') { closePalette(); }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); paletteIndex = Math.min(matches.length - 1, paletteIndex + 1); renderPalette(paletteInput.value); }
+    else if (e.key === 'ArrowUp')   { e.preventDefault(); paletteIndex = Math.max(0, paletteIndex - 1); renderPalette(paletteInput.value); }
+    else if (e.key === 'Enter') {
+      const cmd = matches[paletteIndex];
+      if (cmd) { closePalette(); cmd.run(); }
+    }
+  });
+  document.getElementById('ls-cmd-trigger')?.addEventListener('click', openPalette);
+  document.addEventListener('keydown', e => {
+    if (!document.body.classList.contains('mode-linear')) return;
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); openPalette(); }
+  });
+  palette?.addEventListener('click', e => { if (e.target === palette) closePalette(); });
+
+  // ── Ask bar ─ routes to Programme Lead (Manager) ────────────────
+  const askInput = document.getElementById('ls-askbar-input');
+  const askSend = document.getElementById('ls-askbar-send');
+  async function sendAsk() {
+    const q = askInput.value.trim();
+    if (!q) return;
+    askInput.value = '';
+    askInput.disabled = true;
+    try {
+      // Delegate to the existing extractActions path via consultAdvisor → Programme Lead.
+      const res = await window.hive.consultAdvisor('fxv:manager', q, []);
+      const reply = res?.reply ?? '';
+      if (reply && reply.length >= 60) {
+        await window.hive.extractActions(q, reply, 'Programme Lead');
+        await refreshActions();
+      }
+      flashToast('Programme Lead replied · actions surfaced if any');
+    } catch (err) {
+      flashToast('Ask failed: ' + (err?.message ?? 'unknown'));
+    } finally {
+      askInput.disabled = false;
+      askInput.focus();
+    }
+  }
+  askSend?.addEventListener('click', sendAsk);
+  askInput?.addEventListener('keydown', e => { if (e.key === 'Enter') sendAsk(); });
+
+  function flashToast(msg) {
+    const t = document.createElement('div');
+    t.textContent = msg;
+    t.style.cssText = `position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#16171A;color:#F7F8F8;padding:10px 14px;border:1px solid #1F2023;border-radius:6px;font-size:12px;z-index:100;box-shadow:0 4px 16px rgba(0,0,0,0.5);`;
+    document.body.appendChild(t);
+    setTimeout(() => t.remove(), 2400);
+  }
+
+  // Boot
+  (async function init() {
+    await refreshSidebar();
+    await refreshActions();
+    renderFilterChips();
+    refreshCost();
+    setInterval(refreshCost, 30000);
+  })();
+})();

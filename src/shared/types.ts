@@ -97,6 +97,12 @@ export const IPC = {
   GenerateNextDraft: 'hive:generate-next-draft',
   GetContentQueue: 'hive:get-content-queue',
   ContentDraftProgress: 'hive:content-draft-progress',
+  ListActions: 'hive:list-actions',
+  CreateAction: 'hive:create-action',
+  UpdateAction: 'hive:update-action',
+  UpdateActionStatus: 'hive:update-action-status',
+  DeleteAction: 'hive:delete-action',
+  GetAction: 'hive:get-action',
 } as const;
 
 export type AgentEvent =
