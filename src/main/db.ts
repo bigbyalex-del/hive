@@ -158,6 +158,16 @@ export async function initDb(): Promise<void> {
     );
     CREATE INDEX IF NOT EXISTS idx_actions_status ON actions(status, updated_at);
     CREATE INDEX IF NOT EXISTS idx_actions_project ON actions(project_id, status);
+
+    CREATE TABLE IF NOT EXISTS canvases (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id INTEGER,
+      name TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      state_json TEXT NOT NULL DEFAULT '{}'
+    );
+    CREATE INDEX IF NOT EXISTS idx_canvases_project ON canvases(project_id, updated_at);
   `);
 
   // Lightweight migrations — sql.js doesn't fail on duplicate ALTER, but we
@@ -609,6 +619,79 @@ export function updateAction(id: number, patch: Partial<Pick<ActionRow, 'content
 export function deleteAction(id: number): void {
   if (!db) return;
   const stmt = db.prepare('DELETE FROM actions WHERE id = ?');
+  stmt.run([id]);
+  stmt.free();
+  scheduleSave();
+}
+
+// ---- Canvases ---------------------------------------------------------
+//
+// Infinite-canvas surfaces backed by Konva.js. state_json is a Konva-shape
+// JSON blob plus our own metadata (camera position, image refs, etc).
+// Per-project — switch projects, switch canvas lists.
+
+export interface CanvasRow {
+  id: number;
+  projectId: number | null;
+  name: string;
+  createdAt: number;
+  updatedAt: number;
+  stateJson: string;
+}
+
+export function listCanvases(projectId?: number | null): Pick<CanvasRow, 'id' | 'projectId' | 'name' | 'createdAt' | 'updatedAt'>[] {
+  if (!db) return [];
+  const sql = projectId != null
+    ? 'SELECT id, project_id, name, created_at, updated_at FROM canvases WHERE project_id = ? ORDER BY updated_at DESC LIMIT 200'
+    : 'SELECT id, project_id, name, created_at, updated_at FROM canvases ORDER BY updated_at DESC LIMIT 200';
+  const stmt = db.prepare(sql);
+  if (projectId != null) stmt.bind([projectId]);
+  const out: any[] = [];
+  while (stmt.step()) {
+    const r = stmt.get();
+    out.push({ id: r[0], projectId: r[1], name: r[2], createdAt: r[3], updatedAt: r[4] });
+  }
+  stmt.free();
+  return out;
+}
+
+export function getCanvas(id: number): CanvasRow | null {
+  if (!db) return null;
+  const stmt = db.prepare('SELECT id, project_id, name, created_at, updated_at, state_json FROM canvases WHERE id = ?');
+  stmt.bind([id]);
+  if (!stmt.step()) { stmt.free(); return null; }
+  const r = stmt.get();
+  stmt.free();
+  return { id: r[0] as number, projectId: r[1] as number | null, name: r[2] as string, createdAt: r[3] as number, updatedAt: r[4] as number, stateJson: r[5] as string };
+}
+
+export function createCanvas(opts: { name: string; projectId?: number | null; stateJson?: string }): number | null {
+  if (!db) return null;
+  const ts = Date.now();
+  const stmt = db.prepare('INSERT INTO canvases (project_id, name, created_at, updated_at, state_json) VALUES (?, ?, ?, ?, ?)');
+  stmt.run([opts.projectId ?? null, opts.name.slice(0, 120), ts, ts, opts.stateJson ?? '{}']);
+  stmt.free();
+  const idResult = db.exec('SELECT last_insert_rowid() AS id');
+  const id = idResult[0]?.values?.[0]?.[0] as number | undefined;
+  scheduleSave();
+  return typeof id === 'number' ? id : null;
+}
+
+export function saveCanvasState(id: number, stateJson: string, name?: string): void {
+  if (!db) return;
+  const fields: string[] = ['state_json = ?', 'updated_at = ?'];
+  const args: any[] = [stateJson, Date.now()];
+  if (name != null) { fields.push('name = ?'); args.push(name.slice(0, 120)); }
+  args.push(id);
+  const stmt = db.prepare(`UPDATE canvases SET ${fields.join(', ')} WHERE id = ?`);
+  stmt.run(args);
+  stmt.free();
+  scheduleSave();
+}
+
+export function deleteCanvas(id: number): void {
+  if (!db) return;
+  const stmt = db.prepare('DELETE FROM canvases WHERE id = ?');
   stmt.run([id]);
   stmt.free();
   scheduleSave();

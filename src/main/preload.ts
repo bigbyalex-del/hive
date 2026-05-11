@@ -77,6 +77,11 @@ const IPC = {
   UpdateActionStatus: 'hive:update-action-status',
   DeleteAction: 'hive:delete-action',
   GetAction: 'hive:get-action',
+  ListCanvases: 'hive:list-canvases',
+  GetCanvas: 'hive:get-canvas',
+  CreateCanvas: 'hive:create-canvas',
+  SaveCanvas: 'hive:save-canvas',
+  DeleteCanvas: 'hive:delete-canvas',
 };
 
 contextBridge.exposeInMainWorld('hive', {
@@ -197,4 +202,9 @@ contextBridge.exposeInMainWorld('hive', {
   updateActionStatus: (id: number, status: string) => ipcRenderer.invoke(IPC.UpdateActionStatus, { id, status }),
   deleteAction: (id: number) => ipcRenderer.invoke(IPC.DeleteAction, id),
   getAction: (id: number) => ipcRenderer.invoke(IPC.GetAction, id),
+  listCanvases: (projectId?: number | null) => ipcRenderer.invoke(IPC.ListCanvases, projectId ?? null),
+  getCanvas: (id: number) => ipcRenderer.invoke(IPC.GetCanvas, id),
+  createCanvas: (input: { name: string; projectId?: number | null; stateJson?: string }) => ipcRenderer.invoke(IPC.CreateCanvas, input),
+  saveCanvas: (input: { id: number; stateJson: string; name?: string }) => ipcRenderer.invoke(IPC.SaveCanvas, input),
+  deleteCanvas: (id: number) => ipcRenderer.invoke(IPC.DeleteCanvas, id),
 });

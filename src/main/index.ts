@@ -24,6 +24,7 @@ import { extractIntent as deployExtractIntent, preparePlan as deployPreparePlan,
 import { getPulse as pulseGet, markPulseSeen as pulseMarkSeen } from './pulse';
 import { listChatsForPersona, previewByPersona } from './db';
 import { insertAction, listActions as dbListActions, getAction as dbGetAction, updateAction as dbUpdateAction, deleteAction as dbDeleteAction } from './db';
+import { listCanvases as dbListCanvases, getCanvas as dbGetCanvas, createCanvas as dbCreateCanvas, saveCanvasState, deleteCanvas as dbDeleteCanvas } from './db';
 import { listDrafts as draftsList, openDraftFolderInExplorer, openHeroInPlayer } from './drafts';
 import { generateNextDraft as pipelineGenerate, getQueueSummary as pipelineGetQueue } from './contentPipeline';
 
@@ -487,6 +488,50 @@ app.whenReady().then(async () => {
       return { ok: true, action: dbGetAction(id) };
     } catch (err: any) {
       return { ok: false, error: err?.message ?? String(err), action: null };
+    }
+  });
+
+  ipcMain.handle(IPC.ListCanvases, (_e, projectId: number | null) => {
+    try {
+      return { ok: true, canvases: dbListCanvases(projectId ?? getActiveProjectId()) };
+    } catch (err: any) {
+      return { ok: false, error: err?.message ?? String(err), canvases: [] };
+    }
+  });
+
+  ipcMain.handle(IPC.GetCanvas, (_e, id: number) => {
+    try {
+      return { ok: true, canvas: dbGetCanvas(id) };
+    } catch (err: any) {
+      return { ok: false, error: err?.message ?? String(err), canvas: null };
+    }
+  });
+
+  ipcMain.handle(IPC.CreateCanvas, (_e, input: { name: string; projectId?: number | null; stateJson?: string }) => {
+    try {
+      const name = (input.name?.trim() || `Canvas ${new Date().toLocaleDateString()}`).slice(0, 120);
+      const id = dbCreateCanvas({ name, projectId: input.projectId ?? getActiveProjectId(), stateJson: input.stateJson ?? '{}' });
+      return { ok: true, id };
+    } catch (err: any) {
+      return { ok: false, error: err?.message ?? String(err) };
+    }
+  });
+
+  ipcMain.handle(IPC.SaveCanvas, (_e, input: { id: number; stateJson: string; name?: string }) => {
+    try {
+      saveCanvasState(input.id, input.stateJson, input.name);
+      return { ok: true };
+    } catch (err: any) {
+      return { ok: false, error: err?.message ?? String(err) };
+    }
+  });
+
+  ipcMain.handle(IPC.DeleteCanvas, (_e, id: number) => {
+    try {
+      dbDeleteCanvas(id);
+      return { ok: true };
+    } catch (err: any) {
+      return { ok: false, error: err?.message ?? String(err) };
     }
   });
 

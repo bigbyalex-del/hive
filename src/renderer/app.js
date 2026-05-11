@@ -3938,9 +3938,14 @@ window.__extractActionsFor = async (personaId, question, reply) => {
     })[view] || view;
   }
 
+  function closeCanvasIfOpen() {
+    if (window.__lsCanvas?.isVisible?.()) window.__lsCanvas.close();
+  }
   document.querySelectorAll('.linear-shell .ls-nav-item[data-view]').forEach(el => {
     el.addEventListener('click', () => {
       const v = el.dataset.view;
+      if (v === 'canvas') { setActiveNav('canvas'); return; }  // canvas.js handles its own open()
+      closeCanvasIfOpen();
       if (v === 'inbox') { filter.status = 'todo'; setActiveNav('inbox'); refreshActions(); renderFilterChips(); return; }
       if (v === 'backlog') { filter.status = 'todo'; setActiveNav('backlog'); refreshActions(); renderFilterChips(); return; }
       if (v === 'actions') { filter.status = 'active'; setActiveNav('actions'); refreshActions(); renderFilterChips(); return; }

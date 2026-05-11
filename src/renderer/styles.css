@@ -2226,3 +2226,186 @@ body:not(.mode-linear) .ls-cmdpalette { display: none !important; }
 .linear-shell *::-webkit-scrollbar-thumb:hover { background: #2a2b2f; }
 .linear-shell *::-webkit-scrollbar-track { background: transparent; }
 
+/* ═══════════════════════════════════════════════════════════════════
+   CANVAS VIEW (v3.0-β)
+═══════════════════════════════════════════════════════════════════ */
+
+.ls-canvas-shell {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  height: 100%;
+  background: var(--ls-bg);
+  color: var(--ls-text);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 13px;
+}
+body.mode-linear.canvas-active .linear-shell { grid-template-columns: 232px 1fr 0; }
+body.mode-linear.canvas-active .ls-main { display: none; }
+body.mode-linear.canvas-active .ls-detail { display: none; }
+body.mode-linear.canvas-active .ls-canvas-shell {
+  display: grid;
+  grid-column: 2 / 4;
+  border-left: 1px solid var(--ls-border);
+}
+
+.ls-canvas-rail {
+  background: var(--ls-surface);
+  border-right: 1px solid var(--ls-border);
+  overflow-y: auto;
+}
+.ls-canvas-rail-h {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--ls-border-soft);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ls-text-faint);
+}
+.ls-canvas-rail-new {
+  margin-left: auto;
+  width: 22px; height: 22px;
+  display: grid; place-items: center;
+  background: var(--ls-bg);
+  border: 1px solid var(--ls-border);
+  border-radius: 4px;
+  color: var(--ls-text-dim);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+.ls-canvas-rail-new:hover { background: var(--ls-surface-hov); color: var(--ls-text); }
+.ls-canvas-rail-list { padding: 6px 8px; }
+.ls-canvas-rail-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+  color: var(--ls-text-dim);
+  font-size: 12px;
+  user-select: none;
+}
+.ls-canvas-rail-item:hover { background: var(--ls-surface-hov); color: var(--ls-text); }
+.ls-canvas-rail-item.active { background: var(--ls-surface-hov); color: var(--ls-text); }
+.ls-canvas-rail-item .ls-canvas-rail-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ls-canvas-rail-item .ls-canvas-rail-date {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 10px;
+  color: var(--ls-text-faint);
+}
+
+.ls-canvas-main {
+  display: flex; flex-direction: column;
+  background: var(--ls-bg);
+  overflow: hidden;
+}
+
+.ls-canvas-toolbar {
+  display: flex; align-items: center; gap: 4px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--ls-border);
+  background: var(--ls-surface);
+  flex-shrink: 0;
+}
+.ls-tool {
+  width: 28px; height: 28px;
+  display: grid; place-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: var(--ls-text-dim);
+  cursor: pointer;
+}
+.ls-tool:hover { background: var(--ls-surface-hov); color: var(--ls-text); }
+.ls-tool.active { background: var(--ls-surface-hov); color: var(--ls-accent); border-color: var(--ls-border); }
+.ls-tool-sep { width: 1px; height: 18px; background: var(--ls-border); margin: 0 4px; }
+.ls-canvas-zoom {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--ls-text-faint);
+  padding: 0 8px;
+  font-feature-settings: "tnum";
+}
+.ls-canvas-name {
+  height: 24px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--ls-text);
+  padding: 0 8px;
+  font-family: inherit;
+  font-size: 12px;
+  outline: none;
+  width: 220px;
+  text-align: right;
+}
+.ls-canvas-name:hover { border-color: var(--ls-border); }
+.ls-canvas-name:focus { border-color: var(--ls-accent); text-align: left; }
+.ls-canvas-status {
+  font-size: 11px;
+  color: var(--ls-text-faint);
+  padding: 0 10px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+.ls-canvas-stage {
+  flex: 1;
+  position: relative;
+  background:
+    radial-gradient(circle, #1a1b1f 1px, transparent 1px),
+    #08090A;
+  background-size: 24px 24px;
+  background-position: 0 0;
+  overflow: hidden;
+  cursor: default;
+}
+.ls-canvas-stage.tool-pen,
+.ls-canvas-stage.tool-arrow,
+.ls-canvas-stage.tool-text,
+.ls-canvas-stage.tool-sticky { cursor: crosshair; }
+.ls-canvas-stage.tool-eraser { cursor: not-allowed; }
+.ls-canvas-stage.tool-image { cursor: cell; }
+.ls-canvas-stage.panning { cursor: grabbing; }
+.ls-canvas-stage.dragover::after {
+  content: 'Drop image to add';
+  position: absolute;
+  inset: 12px;
+  display: grid;
+  place-items: center;
+  border: 2px dashed var(--ls-accent);
+  border-radius: 8px;
+  color: var(--ls-accent);
+  font-size: 14px;
+  font-weight: 500;
+  background: rgba(212, 165, 116, 0.06);
+  pointer-events: none;
+  z-index: 10;
+}
+
+.ls-canvas-stage canvas { display: block; }
+
+.ls-canvas-text-overlay {
+  position: absolute;
+  background: transparent;
+  border: 1px solid var(--ls-accent);
+  border-radius: 3px;
+  color: var(--ls-text);
+  font-family: 'Inter', system-ui, sans-serif;
+  padding: 2px 4px;
+  outline: none;
+  resize: none;
+  overflow: hidden;
+  z-index: 20;
+}
+
+.ls-canvas-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--ls-text-faint);
+  text-align: center;
+  pointer-events: none;
+}
+

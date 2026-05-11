@@ -103,6 +103,11 @@ export const IPC = {
   UpdateActionStatus: 'hive:update-action-status',
   DeleteAction: 'hive:delete-action',
   GetAction: 'hive:get-action',
+  ListCanvases: 'hive:list-canvases',
+  GetCanvas: 'hive:get-canvas',
+  CreateCanvas: 'hive:create-canvas',
+  SaveCanvas: 'hive:save-canvas',
+  DeleteCanvas: 'hive:delete-canvas',
 } as const;
 
 export type AgentEvent =
