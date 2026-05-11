@@ -3602,28 +3602,38 @@ window.__extractActionsFor = async (personaId, question, reply) => {
     if (wsName && active) wsName.textContent = active.name;
 
     const projList = document.getElementById('ls-projects-list');
-    if (projList) {
-      projList.innerHTML = projects.map(p => `
-        <div class="ls-nav-item" data-project="${p.id}">
-          <span class="ls-persona-dot" style="background:${projectColor(p)};"></span>
-          <span>${escapeHtml(p.name)}</span>
-        </div>
-      `).join('') || '<div style="padding:4px 8px;color:var(--ls-text-faint);font-size:11px;">No projects yet</div>';
-      projList.querySelectorAll('[data-project]').forEach(el => {
-        el.addEventListener('click', async () => {
-          const id = Number(el.dataset.project);
-          await window.hive.switchProject(id);
-          await refreshSidebar();
-          await refreshActions();
+    const projSection = document.getElementById('ls-projects-section');
+    if (projList && projSection) {
+      // Only show the Projects section when there are 2+ projects —
+      // a single "Default" is dead weight in the sidebar.
+      if (projects.length >= 2) {
+        projSection.style.display = '';
+        projList.innerHTML = projects.map(p => `
+          <div class="ls-nav-item" data-project="${p.id}">
+            <span class="ls-persona-dot" style="background:${projectColor(p)};"></span>
+            <span>${escapeHtml(p.name)}</span>
+          </div>
+        `).join('');
+        projList.querySelectorAll('[data-project]').forEach(el => {
+          el.addEventListener('click', async () => {
+            const id = Number(el.dataset.project);
+            await window.hive.switchProject(id);
+            await refreshSidebar();
+            await refreshActions();
+          });
         });
-      });
+      } else {
+        projSection.style.display = 'none';
+      }
     }
 
     const personaList = document.getElementById('ls-personas-list');
     if (personaList) {
+      // Just the 9 domain specialists + Programme Lead. The 4 page
+      // agents (Today / Programme / Coach Page / Health) duplicate
+      // what the specialists already cover — folded out of the list.
       const specialists = advisors.filter(a => !a.id.startsWith('page:') && a.id !== 'fxv:manager');
       const lead = advisors.find(a => a.id === 'fxv:manager');
-      const pages = advisors.filter(a => a.id.startsWith('page:'));
       const renderRow = a => `
         <div class="ls-nav-item" data-persona="${a.id}">
           <span class="ls-persona-dot" style="background:${personaColor(a.id)};"></span>
@@ -3631,8 +3641,7 @@ window.__extractActionsFor = async (personaId, question, reply) => {
         </div>`;
       personaList.innerHTML =
         (lead ? renderRow(lead) : '') +
-        specialists.map(renderRow).join('') +
-        (pages.length ? '<div class="ls-nav-h" style="padding-top:10px;">Page agents</div>' + pages.map(renderRow).join('') : '');
+        specialists.map(renderRow).join('');
       personaList.querySelectorAll('[data-persona]').forEach(el => {
         el.addEventListener('click', () => {
           filter.personaId = filter.personaId === el.dataset.persona ? null : el.dataset.persona;
@@ -3948,26 +3957,19 @@ window.__extractActionsFor = async (personaId, question, reply) => {
   document.querySelectorAll('.linear-shell .ls-nav-item[data-view]').forEach(el => {
     el.addEventListener('click', () => {
       const v = el.dataset.view;
-      if (v === 'canvas') { setActiveNav('canvas'); return; }  // canvas.js handles its own open()
+      if (v === 'canvas') { setActiveNav('canvas'); return; }
       closeCanvasIfOpen();
-      if (v === 'inbox') { filter.status = 'todo'; setActiveNav('inbox'); refreshActions(); renderFilterChips(); return; }
-      if (v === 'backlog') { filter.status = 'todo'; setActiveNav('backlog'); refreshActions(); renderFilterChips(); return; }
       if (v === 'actions') { filter.status = 'active'; setActiveNav('actions'); refreshActions(); renderFilterChips(); return; }
-      // Modal-backed surfaces — open the existing legacy modal in place,
-      // no shell swap needed thanks to the CSS exception for [id$="-modal"].
       if (v === 'deploys') { setActiveNav('deploys'); document.getElementById('open-deploy')?.click(); return; }
-      if (v === 'council') { setActiveNav('council'); document.getElementById('council-run')?.click(); return; }
-      if (v === 'ship-audit') { setActiveNav('ship-audit'); document.getElementById('open-ship-audit')?.click(); return; }
-      // Inline surfaces (Specialists 9-grid, Pulse strip, Drafts row,
-      // Alerts brainstorm-rail) — switch to legacy shell until v3.0-γ
-      // ports them properly into the Linear list pattern.
-      if (['specialists', 'pulse', 'drafts', 'alerts'].includes(v)) {
+      // Specialists + Drafts still bridge to legacy shell until v3.0-γ
+      // ports them properly into Linear list views.
+      if (v === 'specialists' || v === 'drafts') {
         setActiveNav(v);
         switchToLegacyShell();
-        flashToast(`Opening ${v} in legacy shell — Ctrl-K → "Switch to legacy" returns here.`);
+        flashToast(`Opening ${v} in legacy shell — "← Linear" or Ctrl+Shift+L returns here.`);
         return;
       }
-      flashToast(`${v} view not wired yet.`);
+      flashToast(`${v} not wired yet.`);
     });
   });
 
@@ -3992,12 +3994,14 @@ window.__extractActionsFor = async (personaId, question, reply) => {
     { id: 'filter-todo', label: 'Show todo only', hint: '', run: () => { filter.status = 'todo'; refreshActions(); renderFilterChips(); } },
     { id: 'filter-done', label: 'Show done only', hint: '', run: () => { filter.status = 'done'; refreshActions(); renderFilterChips(); } },
     { id: 'filter-clear', label: 'Clear filters', hint: '', run: () => { filter = { status: 'active', personaId: null, projectId: null, priority: null }; refreshActions(); renderFilterChips(); } },
-    { id: 'run-council', label: 'Run Council', hint: '', run: switchToLegacyThen('open-council') },
-    { id: 'run-ship-audit', label: 'Run Ship Audit', hint: '', run: switchToLegacyThen('open-ship-audit') },
+    { id: 'run-council', label: 'Run Council (fan to all specialists)', hint: '', run: () => document.getElementById('council-run')?.click() },
+    { id: 'run-ship-audit', label: 'Run Ship Audit', hint: '', run: () => document.getElementById('open-ship-audit')?.click() },
+    { id: 'open-deploy', label: 'Open Deploy modal', hint: '', run: () => document.getElementById('open-deploy')?.click() },
+    { id: 'show-pulse', label: 'Show Pulse', hint: '', run: switchToLegacy },
+    { id: 'show-alerts', label: 'Show Alerts', hint: '', run: switchToLegacy },
     { id: 'refresh-seeds', label: 'Refresh memory (re-embed)', hint: '', run: switchToLegacyThen('refresh-seeds') },
     { id: 'generate-draft', label: 'Generate next draft', hint: '', run: switchToLegacyThen('generate-draft') },
-    { id: 'open-deploy', label: 'Open deploy modal', hint: '', run: switchToLegacyThen('open-deploy') },
-    { id: 'open-babysit', label: 'Open babysit', hint: '', run: switchToLegacyThen('open-babysit') },
+    { id: 'open-babysit', label: 'Open Babysit (issue → PR loop)', hint: '', run: switchToLegacyThen('open-babysit') },
   ];
 
   function switchToLegacy() {
