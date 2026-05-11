@@ -65,6 +65,39 @@ function findPersona(id: string): Persona | null {
   return loadPersonas().personas.find(p => p.id === id) ?? null;
 }
 
+// Generate 4 distinct child sub-ideas for a given mind-map node, from
+// the named persona's perspective. Tight + cheap — Haiku, no RAG, single
+// JSON-array output. Used by the canvas "✨ expand" affordance.
+export async function expandMindTopic(personaId: string, topic: string, context?: string[]): Promise<{ ideas: string[]; personaName: string; color: string | null }> {
+  const persona = findPersona(personaId);
+  if (!persona) throw new Error(`unknown persona ${personaId}`);
+  const provider = new AnthropicProvider();
+  const systemPrompt = `You are ${persona.name}, ${persona.title}. Your scope: ${persona.scope}\n\nThe user is mind-mapping. Given a node's label, you propose EXACTLY 4 concrete sub-ideas that would naturally branch off it, written in YOUR voice and angle. Each sub-idea must be an imperative phrase or short noun phrase under 48 characters — punchy, no fluff, no sub-bullets, no numbering. Output ONLY a JSON array of 4 strings. Nothing else.`;
+  const contextBlock = (context && context.length)
+    ? `\n\nNearby context the user is also thinking about (use this to tailor your 4 ideas — don't repeat them, but riff off them):\n${context.slice(0, 30).map(c => `- ${c.slice(0, 160)}`).join('\n')}`
+    : '';
+  const userPrompt = `Node label: "${topic.slice(0, 200)}"${contextBlock}\n\nReturn 4 children of this node, your perspective. JSON array only.`;
+  const result = await provider.run('claude-haiku-4-5-20251001', {
+    systemPrompt,
+    prompt: userPrompt,
+    noTools: true,
+    maxTurns: 1,
+  }, { _agentId: 'mind-expand' } as any);
+  const match = result.text.trim().match(/\[[\s\S]*\]/);
+  if (!match) return { ideas: [], personaName: persona.name, color: null };
+  try {
+    const parsed = JSON.parse(match[0]);
+    if (!Array.isArray(parsed)) return { ideas: [], personaName: persona.name, color: null };
+    const ideas = parsed
+      .filter((x: any) => typeof x === 'string' && x.trim().length > 0)
+      .map((x: string) => x.trim().slice(0, 120))
+      .slice(0, 6);
+    return { ideas, personaName: persona.name, color: null };
+  } catch {
+    return { ideas: [], personaName: persona.name, color: null };
+  }
+}
+
 function cosine(a: number[], b: number[]): number {
   let dot = 0, na = 0, nb = 0;
   const len = Math.min(a.length, b.length);

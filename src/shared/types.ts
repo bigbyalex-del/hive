@@ -114,6 +114,7 @@ export const IPC = {
   WatchPhotosFolder: 'hive:watch-photos-folder',
   UnwatchPhotosFolder: 'hive:unwatch-photos-folder',
   PhotosFolderEvent: 'hive:photos-folder-event',
+  ExpandMindTopic: 'hive:expand-mind-topic',
 } as const;
 
 export type AgentEvent =

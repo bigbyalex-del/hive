@@ -16,7 +16,7 @@ import { listProjects, createProject, getProject, getActiveProjectId, setActiveP
 import { costGBP } from './pricing';
 import { diffWorkerBranch } from './projectRepo';
 import { babysitStart, babysitStop, babysitStatus } from './babysit';
-import { listAdvisors, consultAdvisor, extractActions, runCouncil, runShipAudit } from './advisors';
+import { listAdvisors, consultAdvisor, extractActions, runCouncil, runShipAudit, expandMindTopic } from './advisors';
 import { runSeed } from '../scripts/seed-fxv-personas';
 import { startAlertsPolling, stopAlertsPolling, pollAllOnce, alertsConfig } from './alerts';
 import { listAlerts as dbListAlerts, setAlertStatus, deleteAlertRow, reconcileStuckDeploys } from './db';
@@ -539,15 +539,21 @@ app.whenReady().then(async () => {
   // images and returns lightweight thumbnails via Electron's nativeImage.
   // Full-resolution images load on demand via GetPhotoFull when the user
   // actually drops one onto a canvas.
-  ipcMain.handle(IPC.ListPhotos, async (_e, opts: { folder?: string; limit?: number } = {}) => {
+  ipcMain.handle(IPC.ListPhotos, async (_e, opts: { folder?: string; limit?: number; sinceTs?: number } = {}) => {
     try {
       const fs = require('fs');
       const path = require('path');
       const os = require('os');
-      // Default-folder fallback chain. HiveDrop wins if it exists (the
-       //  iCloud Drive folder iPhone Shortcuts auto-save into); then the
-       //  legacy iCloud-for-Windows path; finally just Pictures.
+      // Default-folder fallback chain. The new iCloud-for-Windows
+       //  (Microsoft Store version, Apr 2024+) auto-syncs every photo
+       //  from the user's iCloud Photo Library to ~/iCloudPhotos/Photos
+       //  once iCloud Drive is enabled. That's the canonical iPhone-→-PC
+       //  pipeline now — wins over everything else. HiveDrop in iCloud
+       //  Drive is the manual fallback for users who want a curated
+       //  drop folder via the share-sheet Shortcut.
       const candidates = [
+        path.join(os.homedir(), 'iCloudPhotos', 'Photos'),
+        path.join(os.homedir(), 'iCloud Photos', 'Photos'),
         path.join(os.homedir(), 'iCloudDrive', 'HiveDrop'),
         path.join(os.homedir(), 'iCloud Drive', 'HiveDrop'),
         path.join(os.homedir(), 'Pictures', 'iCloud Photos', 'Photos'),
@@ -562,6 +568,7 @@ app.whenReady().then(async () => {
       const exts = new Set(['.jpg', '.jpeg', '.png', '.heic', '.heif', '.webp', '.gif']);
       const entries = fs.readdirSync(folder, { withFileTypes: true });
       const limit = Math.max(10, Math.min(500, opts.limit ?? 200));
+      const sinceTs = opts.sinceTs && opts.sinceTs > 0 ? opts.sinceTs : 0;
       const files = entries
         .filter((e: any) => e.isFile())
         .map((e: any) => {
@@ -571,6 +578,7 @@ app.whenReady().then(async () => {
           return { name: e.name, path: full, mtime, size, ext: path.extname(e.name).toLowerCase() };
         })
         .filter((f: any) => exts.has(f.ext))
+        .filter((f: any) => sinceTs === 0 || f.mtime >= sinceTs)
         .sort((a: any, b: any) => b.mtime - a.mtime)
         .slice(0, limit);
       const photos = files.map((f: any) => {
@@ -633,6 +641,18 @@ app.whenReady().then(async () => {
       return { ok: true, folder: res.filePaths[0] };
     } catch (err: any) {
       return { ok: false, error: err?.message ?? String(err) };
+    }
+  });
+
+  ipcMain.handle(IPC.ExpandMindTopic, async (_e, payload: { personaId: string; topic: string; context?: string[] }) => {
+    try {
+      if (!payload?.personaId || !payload?.topic?.trim()) {
+        return { ok: false, error: 'personaId + topic required', ideas: [] };
+      }
+      const result = await expandMindTopic(payload.personaId, payload.topic, payload.context);
+      return { ok: true, ...result };
+    } catch (err: any) {
+      return { ok: false, error: err?.message ?? String(err), ideas: [] };
     }
   });
 

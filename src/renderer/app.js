@@ -3941,6 +3941,10 @@ window.__extractActionsFor = async (personaId, question, reply) => {
   function closeCanvasIfOpen() {
     if (window.__lsCanvas?.isVisible?.()) window.__lsCanvas.close();
   }
+  function switchToLegacyShell() {
+    document.body.classList.remove('mode-linear');
+    document.body.classList.add('mode-fxv-advise');
+  }
   document.querySelectorAll('.linear-shell .ls-nav-item[data-view]').forEach(el => {
     el.addEventListener('click', () => {
       const v = el.dataset.view;
@@ -3949,8 +3953,21 @@ window.__extractActionsFor = async (personaId, question, reply) => {
       if (v === 'inbox') { filter.status = 'todo'; setActiveNav('inbox'); refreshActions(); renderFilterChips(); return; }
       if (v === 'backlog') { filter.status = 'todo'; setActiveNav('backlog'); refreshActions(); renderFilterChips(); return; }
       if (v === 'actions') { filter.status = 'active'; setActiveNav('actions'); refreshActions(); renderFilterChips(); return; }
-      // Other views not yet implemented — palette-toast them in.
-      flashToast(`${el.dataset.view} view ships in a later slice. Use Ctrl-K → "switch to legacy" for now.`);
+      // Modal-backed surfaces — open the existing legacy modal in place,
+      // no shell swap needed thanks to the CSS exception for [id$="-modal"].
+      if (v === 'deploys') { setActiveNav('deploys'); document.getElementById('open-deploy')?.click(); return; }
+      if (v === 'council') { setActiveNav('council'); document.getElementById('council-run')?.click(); return; }
+      if (v === 'ship-audit') { setActiveNav('ship-audit'); document.getElementById('open-ship-audit')?.click(); return; }
+      // Inline surfaces (Specialists 9-grid, Pulse strip, Drafts row,
+      // Alerts brainstorm-rail) — switch to legacy shell until v3.0-γ
+      // ports them properly into the Linear list pattern.
+      if (['specialists', 'pulse', 'drafts', 'alerts'].includes(v)) {
+        setActiveNav(v);
+        switchToLegacyShell();
+        flashToast(`Opening ${v} in legacy shell — Ctrl-K → "Switch to legacy" returns here.`);
+        return;
+      }
+      flashToast(`${v} view not wired yet.`);
     });
   });
 
@@ -4034,8 +4051,24 @@ window.__extractActionsFor = async (personaId, question, reply) => {
   });
   document.getElementById('ls-cmd-trigger')?.addEventListener('click', openPalette);
   document.addEventListener('keydown', e => {
+    // Ctrl+Shift+L → swap shells regardless of current mode
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'l') {
+      e.preventDefault();
+      if (document.body.classList.contains('mode-linear')) switchToLegacy();
+      else {
+        document.body.classList.remove('mode-fxv-advise');
+        document.body.classList.add('mode-linear');
+      }
+      return;
+    }
     if (!document.body.classList.contains('mode-linear')) return;
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); openPalette(); }
+  });
+  // Legacy-shell "← Linear" button
+  document.getElementById('back-to-linear')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    document.body.classList.remove('mode-fxv-advise');
+    document.body.classList.add('mode-linear');
   });
   palette?.addEventListener('click', e => { if (e.target === palette) closePalette(); });
 
