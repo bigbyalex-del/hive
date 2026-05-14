@@ -21,6 +21,89 @@ import { listActions } from './db';
 const dynamicImport = new Function('m', 'return import(m)') as (m: string) => Promise<any>;
 const GENERATED_IMAGES_DIR = path.join(os.homedir(), '.hive', 'generated-images');
 
+// ── Image generation providers ────────────────────────────────────
+// All return base64 PNG. Each requires a different env var; absence
+// throws a clear error so the persona can tell the user what to set.
+
+async function generateOpenAI(prompt: string, size: string, quality: 'standard' | 'high'): Promise<string> {
+  if (!process.env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY missing — needed for gpt-image-1');
+  const mod = await dynamicImport('openai');
+  const Ctor = mod.default ?? mod.OpenAI;
+  const client = new Ctor({ apiKey: process.env.OPENAI_API_KEY });
+  const resp = await client.images.generate({
+    model: 'gpt-image-1',
+    prompt: prompt.slice(0, 4000),
+    size,
+    quality,
+    n: 1,
+  });
+  const b64 = resp?.data?.[0]?.b64_json;
+  if (!b64) throw new Error('OpenAI returned no image');
+  return b64;
+}
+
+async function generateFluxPro(prompt: string, size: string): Promise<string> {
+  if (!process.env.FAL_KEY) throw new Error('FAL_KEY missing — add to .env to use flux-pro. Get one at fal.ai/dashboard/keys');
+  // fal.ai uses image_size enums; map our sizes to theirs
+  const fluxSize = size === '1536x1024' ? 'landscape_4_3'
+    : size === '1024x1536' ? 'portrait_4_3'
+    : 'square_hd';
+  // Synchronous "run" endpoint — blocks until generation finishes
+  const resp = await fetch('https://fal.run/fal-ai/flux-pro/v1.1', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Key ${process.env.FAL_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      prompt: prompt.slice(0, 4000),
+      image_size: fluxSize,
+      num_images: 1,
+      enable_safety_checker: true,
+    }),
+  });
+  if (!resp.ok) {
+    const errText = await resp.text().catch(() => '');
+    throw new Error(`fal.ai flux-pro: HTTP ${resp.status} ${errText.slice(0, 200)}`);
+  }
+  const data = await resp.json();
+  const imgUrl = data?.images?.[0]?.url;
+  if (!imgUrl) throw new Error('fal.ai returned no image URL');
+  // Fetch the image bytes and convert to base64
+  const imgResp = await fetch(imgUrl);
+  if (!imgResp.ok) throw new Error(`flux-pro image fetch failed: HTTP ${imgResp.status}`);
+  const buf = Buffer.from(await imgResp.arrayBuffer());
+  return buf.toString('base64');
+}
+
+async function generateImagen(prompt: string, size: string): Promise<string> {
+  const apiKey = process.env.GOOGLE_API_KEY ?? process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error('GOOGLE_API_KEY missing — add to .env to use imagen-3. Get one at aistudio.google.com');
+  // Google Imagen aspect-ratio enum mapping
+  const aspect = size === '1536x1024' ? '4:3'
+    : size === '1024x1536' ? '3:4'
+    : '1:1';
+  const resp = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        instances: [{ prompt: prompt.slice(0, 4000) }],
+        parameters: { sampleCount: 1, aspectRatio: aspect, personGeneration: 'allow_adult' },
+      }),
+    },
+  );
+  if (!resp.ok) {
+    const errText = await resp.text().catch(() => '');
+    throw new Error(`Imagen: HTTP ${resp.status} ${errText.slice(0, 300)}`);
+  }
+  const data = await resp.json();
+  const b64 = data?.predictions?.[0]?.bytesBase64Encoded;
+  if (!b64) throw new Error('Imagen returned no image');
+  return b64;
+}
+
 const FXV_ROOT = 'C:\\Users\\Fusion\\.openclaw\\workspace\\fxv-performance';
 const FXV_ALLOWED_SUBDIRS = ['mobile', 'supabase', 'site', 'docs'];
 
@@ -152,44 +235,43 @@ function chatTools(): ToolDef[] {
     },
     {
       name: 'generate_image',
-      description: 'Generate an image with OpenAI gpt-image-1 (DALL-E successor) and save it to ~/.hive/generated-images/. Returns the absolute file path. Use for promotional artwork, mockups, hero images, etc. Each image costs ~£0.04 (1024x1024 standard). Always ask the user first if they want you to generate — don\'t use it speculatively.',
+      description: `Generate an image and save it to ~/.hive/generated-images/. Returns the saved path. Pick the model based on the job:
+- gpt-image-1 (default): OpenAI's DALL-E successor. Best for text rendering inside images, prompt adherence, instructional/promotional. ~£0.03 std, £0.13 HD.
+- flux-pro: Black Forest Labs Flux 1.1 Pro via fal.ai. Best for raw aesthetic quality, athletic / cinematic photography. ~£0.04. Needs FAL_KEY.
+- imagen-3: Google Imagen 3. Best photorealism (people, action shots). ~£0.04. Needs GOOGLE_API_KEY.
+
+Always ask the user before generating — don't use speculatively.`,
       schema: {
         type: 'object',
         properties: {
-          prompt: { type: 'string', description: 'detailed description of the image to generate (be specific about style, composition, colours, mood)' },
-          size: { type: 'string', enum: ['1024x1024', '1536x1024', '1024x1536'], description: 'output size. 1024x1024=square, 1536x1024=landscape, 1024x1536=portrait. Default 1024x1024.' },
-          quality: { type: 'string', enum: ['standard', 'high'], description: 'standard ~£0.04, high ~£0.17. Default standard.' },
-          filename: { type: 'string', description: 'optional descriptive filename (no extension, no slashes). Defaults to a timestamp.' },
+          prompt: { type: 'string', description: 'detailed description (style, composition, colours, mood). gpt-image-1 follows prompts most literally; flux/imagen reward more descriptive language.' },
+          model: { type: 'string', enum: ['gpt-image-1', 'flux-pro', 'imagen-3'], description: 'which image model to use. Default gpt-image-1.' },
+          size: { type: 'string', enum: ['1024x1024', '1536x1024', '1024x1536'], description: 'aspect: square / landscape / portrait. Default 1024x1024.' },
+          quality: { type: 'string', enum: ['standard', 'high'], description: 'standard or high (gpt-image-1 only). Default standard.' },
+          filename: { type: 'string', description: 'optional descriptive filename (no extension, no slashes).' },
         },
         required: ['prompt'],
       },
-      run: async ({ prompt, size, quality, filename }) => {
-        if (!process.env.OPENAI_API_KEY) {
-          throw new Error('OPENAI_API_KEY missing in .env — needed for image generation');
-        }
+      run: async ({ prompt, model, size, quality, filename }) => {
         if (typeof prompt !== 'string' || !prompt.trim()) throw new Error('prompt required');
-        const mod = await dynamicImport('openai');
-        const Ctor = mod.default ?? mod.OpenAI;
-        const client = new Ctor({ apiKey: process.env.OPENAI_API_KEY });
         const requestSize = ['1024x1024', '1536x1024', '1024x1536'].includes(size) ? size : '1024x1024';
-        const requestQuality = quality === 'high' ? 'high' : 'standard';
-        const resp = await client.images.generate({
-          model: 'gpt-image-1',
-          prompt: prompt.slice(0, 4000),
-          size: requestSize,
-          quality: requestQuality,
-          n: 1,
-        });
-        const b64 = resp?.data?.[0]?.b64_json;
-        if (!b64) throw new Error('no image returned by API');
-        await fs.mkdir(GENERATED_IMAGES_DIR, { recursive: true });
+        const chosen = ['gpt-image-1', 'flux-pro', 'imagen-3'].includes(model) ? model : 'gpt-image-1';
         const safeName = (typeof filename === 'string' && filename.trim())
           ? filename.replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 80)
-          : `img-${Date.now()}`;
+          : `img-${chosen}-${Date.now()}`;
+        let b64: string;
+        if (chosen === 'gpt-image-1') {
+          b64 = await generateOpenAI(prompt, requestSize, quality === 'high' ? 'high' : 'standard');
+        } else if (chosen === 'flux-pro') {
+          b64 = await generateFluxPro(prompt, requestSize);
+        } else {
+          b64 = await generateImagen(prompt, requestSize);
+        }
+        await fs.mkdir(GENERATED_IMAGES_DIR, { recursive: true });
         const filePath = path.join(GENERATED_IMAGES_DIR, `${safeName}.png`);
         await fs.writeFile(filePath, Buffer.from(b64, 'base64'));
         const sizeBytes = Buffer.byteLength(b64, 'base64');
-        return `Saved: ${filePath}\nSize: ${requestSize} ${requestQuality}\nFile size: ${(sizeBytes / 1024).toFixed(0)} KB\n\nThe user can open this folder via Explorer to review. They'll need to copy/upload to wherever they want to use it.`;
+        return `Saved: ${filePath}\nModel: ${chosen}\nSize: ${requestSize}\nFile size: ${(sizeBytes / 1024).toFixed(0)} KB`;
       },
     },
     {
