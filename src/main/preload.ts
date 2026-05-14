@@ -89,6 +89,15 @@ const IPC = {
   UnwatchPhotosFolder: 'hive:unwatch-photos-folder',
   PhotosFolderEvent: 'hive:photos-folder-event',
   ExpandMindTopic: 'hive:expand-mind-topic',
+  FlowStart: 'hive:flow-start',
+  FlowStop: 'hive:flow-stop',
+  FlowStatus: 'hive:flow-status',
+  FlowLog: 'hive:flow-log',
+  PreviewLoadUrl: 'hive:preview-load-url',
+  CaptureBug: 'hive:capture-bug',
+  AuditActions: 'hive:audit-actions',
+  CodebaseSnapshotStats: 'hive:codebase-snapshot-stats',
+  CodebaseSnapshotRefresh: 'hive:codebase-snapshot-refresh',
 };
 
 contextBridge.exposeInMainWorld('hive', {
@@ -101,6 +110,23 @@ contextBridge.exposeInMainWorld('hive', {
   openPreviewWindow: () => ipcRenderer.invoke(IPC.OpenPreviewWindow),
   pushPreviewHtml: (html: string, projectType?: string) =>
     ipcRenderer.invoke(IPC.PreviewBroadcast, projectType ? { html, projectType } : html),
+  previewLoadUrl: (url: string, projectType?: string) =>
+    ipcRenderer.invoke(IPC.PreviewLoadUrl, { url, projectType: projectType ?? 'ios' }),
+  captureBug: (note?: string) => ipcRenderer.invoke(IPC.CaptureBug, { note: note ?? '' }),
+  auditActions: () => ipcRenderer.invoke(IPC.AuditActions),
+  flowStart: () => ipcRenderer.invoke(IPC.FlowStart),
+  flowStop: () => ipcRenderer.invoke(IPC.FlowStop),
+  flowStatus: () => ipcRenderer.invoke(IPC.FlowStatus),
+  onFlowLog: (cb: (evt: { line: string; ts: number }) => void) => {
+    const listener = (_: Electron.IpcRendererEvent, evt: { line: string; ts: number }) => cb(evt);
+    ipcRenderer.on(IPC.FlowLog, listener);
+    return () => ipcRenderer.removeListener(IPC.FlowLog, listener);
+  },
+  onFlowStatus: (cb: (snap: any) => void) => {
+    const listener = (_: Electron.IpcRendererEvent, snap: any) => cb(snap);
+    ipcRenderer.on(IPC.FlowStatus, listener);
+    return () => ipcRenderer.removeListener(IPC.FlowStatus, listener);
+  },
   captureScreen: () => ipcRenderer.invoke(IPC.CaptureScreen),
   snipRegion: () => ipcRenderer.invoke(IPC.SnipRegion),
   speak: (text: string) => ipcRenderer.invoke(IPC.Speak, text),
@@ -137,8 +163,10 @@ contextBridge.exposeInMainWorld('hive', {
   babysitStop: () => ipcRenderer.invoke(IPC.BabysitStop),
   babysitStatus: () => ipcRenderer.invoke(IPC.BabysitStatus),
   listAdvisors: () => ipcRenderer.invoke(IPC.ListAdvisors),
-  consultAdvisor: (personaId: string, question: string, history?: { role: 'user' | 'assistant'; content: string }[]) =>
-    ipcRenderer.invoke(IPC.ConsultAdvisor, { personaId, question, history: history ?? [] }),
+  consultAdvisor: (personaId: string, question: string, history?: { role: 'user' | 'assistant'; content: string }[], opts?: { useFullCodebase?: boolean }) =>
+    ipcRenderer.invoke(IPC.ConsultAdvisor, { personaId, question, history: history ?? [], useFullCodebase: !!opts?.useFullCodebase }),
+  codebaseSnapshotStats: () => ipcRenderer.invoke(IPC.CodebaseSnapshotStats),
+  codebaseSnapshotRefresh: () => ipcRenderer.invoke(IPC.CodebaseSnapshotRefresh),
   refreshSeeds: () => ipcRenderer.invoke(IPC.RefreshSeeds),
   onRefreshSeedsLog: (cb: (line: string) => void) => {
     const listener = (_: Electron.IpcRendererEvent, line: string) => cb(line);
@@ -147,7 +175,8 @@ contextBridge.exposeInMainWorld('hive', {
   },
   extractActions: (question: string, reply: string, personaName: string) =>
     ipcRenderer.invoke(IPC.ExtractActions, { question, reply, personaName }),
-  runCouncil: (question: string) => ipcRenderer.invoke(IPC.RunCouncil, question),
+  runCouncil: (question: string, opts?: { useFullCodebase?: boolean }) =>
+    ipcRenderer.invoke(IPC.RunCouncil, opts?.useFullCodebase ? { question, useFullCodebase: true } : question),
   runShipAudit: () => ipcRenderer.invoke(IPC.RunShipAudit),
   onShipAuditProgress: (cb: (evt: any) => void) => {
     const listener = (_: Electron.IpcRendererEvent, evt: any) => cb(evt);

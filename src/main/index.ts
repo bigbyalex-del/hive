@@ -16,7 +16,7 @@ import { listProjects, createProject, getProject, getActiveProjectId, setActiveP
 import { costGBP } from './pricing';
 import { diffWorkerBranch } from './projectRepo';
 import { babysitStart, babysitStop, babysitStatus } from './babysit';
-import { listAdvisors, consultAdvisor, extractActions, runCouncil, runShipAudit, expandMindTopic } from './advisors';
+import { listAdvisors, consultAdvisor, extractActions, runCouncil, runShipAudit, expandMindTopic, auditActions } from './advisors';
 import { runSeed } from '../scripts/seed-fxv-personas';
 import { startAlertsPolling, stopAlertsPolling, pollAllOnce, alertsConfig } from './alerts';
 import { listAlerts as dbListAlerts, setAlertStatus, deleteAlertRow, reconcileStuckDeploys } from './db';
@@ -27,6 +27,7 @@ import { insertAction, listActions as dbListActions, getAction as dbGetAction, u
 import { listCanvases as dbListCanvases, getCanvas as dbGetCanvas, createCanvas as dbCreateCanvas, saveCanvasState, deleteCanvas as dbDeleteCanvas } from './db';
 import { listDrafts as draftsList, openDraftFolderInExplorer, openHeroInPlayer } from './drafts';
 import { generateNextDraft as pipelineGenerate, getQueueSummary as pipelineGetQueue } from './contentPipeline';
+import { start as flowStart, stop as flowStop, snapshot as flowSnapshot, attachWindow as flowAttachWindow, isRunning as flowIsRunning } from './flowMode';
 
 dotenv.config({ path: path.join(__dirname, '..', '..', '.env') });
 
@@ -96,8 +97,29 @@ function injectPreview(html: string) {
   `).catch(err => console.error('[hive] preview injection failed:', err));
 }
 
+function injectPreviewUrl(url: string) {
+  if (!previewWindow || previewWindow.isDestroyed()) return;
+  const safe = JSON.stringify(url);
+  previewWindow.webContents.executeJavaScript(`
+    (function() {
+      const f = document.getElementById('f');
+      if (f) {
+        f.removeAttribute('srcdoc');
+        f.src = ${safe};
+        document.body.classList.add('loaded');
+      }
+      true;
+    })();
+  `).catch(err => console.error('[hive] preview url injection failed:', err));
+}
+
 function injectPreviewType(projectType: string) {
   if (!previewWindow || previewWindow.isDestroyed()) return;
+  // Resize to phone dimensions when switching to ios so the bezel doesn't sit
+  // in a sea of dead space.
+  if (projectType === 'ios') {
+    try { previewWindow.setSize(520, 1040); } catch {}
+  }
   const safeType = JSON.stringify(projectType);
   previewWindow.webContents.executeJavaScript(`
     (function() {
@@ -140,6 +162,7 @@ function createWindow() {
   });
 
   mainWindow.loadFile(path.join(__dirname, '..', '..', 'src', 'renderer', 'index.html'));
+  flowAttachWindow(mainWindow);
 
   if (process.env.HIVE_DEVTOOLS === '1') {
     mainWindow.webContents.openDevTools({ mode: 'detach' });
@@ -240,6 +263,112 @@ app.whenReady().then(async () => {
   ipcMain.handle(IPC.SetModelConfig, (_e, cfg) => { setModelConfig(cfg); return { ok: true }; });
   ipcMain.handle(IPC.ListProviders, () => listProviders());
   ipcMain.handle(IPC.OpenPreviewWindow, () => { openPreviewWindow(); return { ok: true }; });
+  ipcMain.handle(IPC.PreviewLoadUrl, (_e, payload: { url: string; projectType?: string }) => {
+    if (!previewWindow || previewWindow.isDestroyed()) openPreviewWindow();
+    const ptype = payload.projectType ?? 'ios';
+    lastPreviewType = ptype;
+    if (!previewReady) {
+      pendingPreviewType = ptype;
+      // Queue url via srcdoc-less inject once ready.
+      previewWindow?.webContents.once('did-finish-load', () => {
+        injectPreviewType(ptype);
+        injectPreviewUrl(payload.url);
+      });
+    } else {
+      injectPreviewType(ptype);
+      injectPreviewUrl(payload.url);
+    }
+    return { ok: true };
+  });
+  ipcMain.handle(IPC.CodebaseSnapshotStats, async () => {
+    const { getSnapshot, getSnapshotStats } = await import('./codebaseSnapshot');
+    let stats = getSnapshotStats();
+    if (!stats) {
+      await getSnapshot();
+      stats = getSnapshotStats();
+    }
+    return { ok: true, stats };
+  });
+  ipcMain.handle(IPC.CodebaseSnapshotRefresh, async () => {
+    const mod = await import('./codebaseSnapshot');
+    mod.invalidateSnapshot();
+    await mod.getSnapshot();
+    return { ok: true, stats: mod.getSnapshotStats() };
+  });
+  ipcMain.handle(IPC.AuditActions, async () => {
+    try {
+      const projectId = getActiveProjectId() ?? undefined;
+      const all = dbListActions({ projectId, limit: 500 });
+      const live = all.filter(a => a.status !== 'done');
+      if (!live.length) return { ok: true, items: [] };
+      const audit = await auditActions(live as any);
+      return { ok: true, items: audit };
+    } catch (err: any) {
+      return { ok: false, error: err?.message ?? String(err) };
+    }
+  });
+  ipcMain.handle(IPC.CaptureBug, async (_e, payload: { note?: string }) => {
+    if (!previewWindow || previewWindow.isDestroyed()) {
+      return { ok: false, error: 'preview window not open — start Flow first' };
+    }
+    try {
+      const fsp = await import('fs/promises');
+      const image = await previewWindow.webContents.capturePage();
+      const buf = image.toPNG();
+      const ts = Date.now();
+      const stamp = new Date(ts).toISOString().replace(/[:.]/g, '-').replace('T', '_').slice(0, -5);
+      const dir = path.join(process.env.USERPROFILE || process.env.HOME || '.', '.hive', 'bug-reports');
+      await fsp.mkdir(dir, { recursive: true });
+      const pngPath = path.join(dir, `${stamp}.png`);
+      await fsp.writeFile(pngPath, buf);
+      // Pull iframe URL so we know what route was on screen.
+      let iframeUrl: string | null = null;
+      try {
+        iframeUrl = await previewWindow.webContents.executeJavaScript(
+          "(function(){var f=document.getElementById('f');return f?(f.src||f.contentWindow?.location?.href||null):null;})()",
+        );
+      } catch {}
+      const noteText = (payload?.note || '').trim();
+      const content = `Bug @ ${new Date(ts).toLocaleString()}${noteText ? ` — ${noteText}` : ''}`;
+      const source =
+        `Screenshot: ${pngPath}\n` +
+        (iframeUrl ? `URL: ${iframeUrl}\n` : '') +
+        `Captured: ${new Date(ts).toISOString()}\n` +
+        (noteText ? `\nNote: ${noteText}\n` : '');
+      const id = insertAction({
+        content,
+        status: 'todo',
+        priority: 'medium',
+        sourceQuestion: source,
+        projectId: getActiveProjectId() ?? null,
+      });
+      return { ok: true, actionId: id, pngPath, iframeUrl };
+    } catch (err: any) {
+      return { ok: false, error: err?.message ?? String(err) };
+    }
+  });
+  ipcMain.handle(IPC.FlowStart, async () => {
+    const result = await flowStart();
+    if (result.ok && result.url) {
+      // Auto-open preview window in iOS bezel pointing at the dev server.
+      // Set type BEFORE opening so the window opens at iPhone dimensions, not desktop.
+      lastPreviewType = 'ios';
+      if (!previewWindow || previewWindow.isDestroyed()) openPreviewWindow();
+      if (previewReady) {
+        injectPreviewType('ios');
+        injectPreviewUrl(result.url);
+      } else {
+        pendingPreviewType = 'ios';
+        previewWindow?.webContents.once('did-finish-load', () => {
+          injectPreviewType('ios');
+          injectPreviewUrl(result.url!);
+        });
+      }
+    }
+    return result;
+  });
+  ipcMain.handle(IPC.FlowStop, async () => flowStop());
+  ipcMain.handle(IPC.FlowStatus, () => flowSnapshot());
   ipcMain.handle(IPC.PreviewBroadcast, (_e, payload: string | { html: string; projectType?: string }) => {
     if (typeof payload === 'string') broadcastPreview(payload);
     else broadcastPreview(payload.html, payload.projectType);
@@ -391,9 +520,14 @@ app.whenReady().then(async () => {
       return { ok: false, error: err?.message ?? String(err) };
     }
   });
-  ipcMain.handle(IPC.ConsultAdvisor, async (_e, payload: { personaId: string; question: string; history: { role: 'user' | 'assistant'; content: string }[] }) => {
+  ipcMain.handle(IPC.ConsultAdvisor, async (_e, payload: { personaId: string; question: string; history: { role: 'user' | 'assistant'; content: string }[]; useFullCodebase?: boolean }) => {
     try {
-      const result = await consultAdvisor(payload.personaId, payload.question, payload.history ?? []);
+      const result = await consultAdvisor(
+        payload.personaId,
+        payload.question,
+        payload.history ?? [],
+        { useFullCodebase: !!payload.useFullCodebase },
+      );
       return { ok: true, ...result };
     } catch (err: any) {
       return { ok: false, error: err?.message ?? String(err) };
@@ -673,9 +807,11 @@ app.whenReady().then(async () => {
     }
   });
 
-  ipcMain.handle(IPC.RunCouncil, async (_e, question: string) => {
+  ipcMain.handle(IPC.RunCouncil, async (_e, payload: string | { question: string; useFullCodebase?: boolean }) => {
     try {
-      const result = await runCouncil(question);
+      const question = typeof payload === 'string' ? payload : payload.question;
+      const useFullCodebase = typeof payload === 'object' && !!payload.useFullCodebase;
+      const result = await runCouncil(question, { useFullCodebase });
       return { ok: true, ...result };
     } catch (err: any) {
       return { ok: false, error: err?.message ?? String(err) };

@@ -115,6 +115,15 @@ export const IPC = {
   UnwatchPhotosFolder: 'hive:unwatch-photos-folder',
   PhotosFolderEvent: 'hive:photos-folder-event',
   ExpandMindTopic: 'hive:expand-mind-topic',
+  FlowStart: 'hive:flow-start',
+  FlowStop: 'hive:flow-stop',
+  FlowStatus: 'hive:flow-status',
+  FlowLog: 'hive:flow-log',
+  PreviewLoadUrl: 'hive:preview-load-url',
+  CaptureBug: 'hive:capture-bug',
+  AuditActions: 'hive:audit-actions',
+  CodebaseSnapshotStats: 'hive:codebase-snapshot-stats',
+  CodebaseSnapshotRefresh: 'hive:codebase-snapshot-refresh',
 } as const;
 
 export type AgentEvent =

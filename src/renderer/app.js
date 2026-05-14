@@ -3551,6 +3551,9 @@ window.__extractActionsFor = async (personaId, question, reply) => {
   let activeView = 'actions';
   let selectedActionId = null;
   let filter = { status: 'active', personaId: null, projectId: null, priority: null };
+  let selectedPersonaId = null;
+  let personaChatThreads = {};  // personaId -> [{role, content, ts}]
+  let personaChatLoading = {};  // personaId -> bool
 
   function relTime(ts) {
     const s = Math.floor((Date.now() - ts) / 1000);
@@ -3643,10 +3646,20 @@ window.__extractActionsFor = async (personaId, question, reply) => {
         (lead ? renderRow(lead) : '') +
         specialists.map(renderRow).join('');
       personaList.querySelectorAll('[data-persona]').forEach(el => {
-        el.addEventListener('click', () => {
-          filter.personaId = filter.personaId === el.dataset.persona ? null : el.dataset.persona;
-          renderFilterChips();
-          renderList();
+        el.addEventListener('click', async () => {
+          const pid = el.dataset.persona;
+          // In Specialists view: open chat for that persona.
+          // In any other view: filter Actions by persona (existing behaviour).
+          if (activeView === 'specialists') {
+            selectedPersonaId = pid;
+            await loadPersonaChat(pid);
+            renderSpecialistsList();
+            renderSpecialistsDetail();
+          } else {
+            filter.personaId = filter.personaId === pid ? null : pid;
+            renderFilterChips();
+            renderList();
+          }
         });
       });
     }
@@ -3744,6 +3757,7 @@ window.__extractActionsFor = async (personaId, question, reply) => {
   }
 
   function renderList() {
+    if (activeView === 'specialists') return renderSpecialistsList();
     const list = document.getElementById('ls-list');
     if (!list) return;
     const visible = actions.filter(passesFilter);
@@ -3811,6 +3825,7 @@ window.__extractActionsFor = async (personaId, question, reply) => {
   }
 
   function renderDetail() {
+    if (activeView === 'specialists') return renderSpecialistsDetail();
     const empty = document.getElementById('ls-detail-empty');
     const body = document.getElementById('ls-detail-body');
     if (!empty || !body) return;
@@ -3862,6 +3877,261 @@ window.__extractActionsFor = async (personaId, question, reply) => {
       selectedActionId = null;
       await refreshActions();
       renderDetail();
+    });
+  }
+
+  // ── Specialists view (Linear-native chat) ─────────────────────────
+  async function loadPersonaChat(personaId) {
+    if (personaChatThreads[personaId] || personaChatLoading[personaId]) return;
+    personaChatLoading[personaId] = true;
+    try {
+      const res = await window.hive.listPersonaChats(personaId, 100);
+      const rows = res?.chats ?? res ?? [];
+      personaChatThreads[personaId] = rows.map(r => ({
+        role: r.role,
+        content: r.content,
+        ts: r.ts,
+      }));
+    } catch {
+      personaChatThreads[personaId] = [];
+    }
+    personaChatLoading[personaId] = false;
+  }
+
+  function renderSpecialistsList() {
+    const list = document.getElementById('ls-list');
+    if (!list) return;
+    const all = advisors.filter(a => a && a.id);
+    const countEl = document.getElementById('ls-list-count');
+    if (countEl) countEl.textContent = `${all.length} specialist${all.length === 1 ? '' : 's'}`;
+    if (!all.length) {
+      list.innerHTML = `<div class="ls-empty"><div class="ls-empty-title">No specialists loaded</div><div class="ls-empty-sub">Run "Refresh memory" from Ctrl-K.</div></div>`;
+      return;
+    }
+    const lead = all.find(a => a.id === 'fxv:manager');
+    const specs = all.filter(a => !a.id.startsWith('page:') && a.id !== 'fxv:manager');
+    const pages = all.filter(a => a.id.startsWith('page:'));
+    const section = (label, rows) => rows.length ? `
+      <div class="ls-group-h"><span>${label}</span><span class="ls-group-count">${rows.length}</span></div>
+      ${rows.map(specRowMarkup).join('')}
+    ` : '';
+    list.innerHTML =
+      (lead ? section('Programme Lead', [lead]) : '') +
+      section('Specialists', specs) +
+      section('Page agents', pages);
+    list.querySelectorAll('[data-persona-row]').forEach(el => {
+      el.addEventListener('click', async () => {
+        selectedPersonaId = el.dataset.personaRow;
+        await loadPersonaChat(selectedPersonaId);
+        renderSpecialistsList();
+        renderSpecialistsDetail();
+      });
+    });
+  }
+
+  function specRowMarkup(a) {
+    const sel = a.id === selectedPersonaId ? ' sel' : '';
+    const tag = (a.id.split(':')[1] || a.id).slice(0, 6).toUpperCase();
+    const scope = a.scope || a.summary || '';
+    const chatCount = (personaChatThreads[a.id] || []).length;
+    const countStr = chatCount ? `${chatCount} msg` : '';
+    return `
+      <div class="ls-row${sel}" data-persona-row="${a.id}">
+        <div class="ls-id">${escapeHtml(tag)}</div>
+        <span class="ls-sdot" style="background:${personaColor(a.id)};border-color:${personaColor(a.id)};"></span>
+        <div class="ls-title">${escapeHtml(a.name)}</div>
+        <div class="ls-meta-pill" style="color:var(--ls-text-faint);max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(scope)}</div>
+        <div></div>
+        <div></div>
+        <div class="ls-updated">${countStr}</div>
+      </div>
+    `;
+  }
+
+  function renderSpecialistsDetail() {
+    const empty = document.getElementById('ls-detail-empty');
+    const body = document.getElementById('ls-detail-body');
+    if (!empty || !body) return;
+    if (!selectedPersonaId) {
+      empty.style.display = '';
+      body.style.display = 'none';
+      const t = empty.querySelector('.ls-detail-empty-title');
+      const s = empty.querySelector('.ls-detail-empty-sub');
+      if (t) t.textContent = 'Select a specialist';
+      if (s) s.textContent = 'Click any row to open the chat thread.';
+      return;
+    }
+    const persona = advisors.find(a => a.id === selectedPersonaId);
+    if (!persona) return;
+    empty.style.display = 'none';
+    body.style.display = '';
+    const thread = personaChatThreads[selectedPersonaId] || [];
+    const threadHtml = thread.length
+      ? thread.map(m => `
+          <div style="margin-bottom:14px;">
+            <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:${m.role === 'user' ? 'var(--ls-text-faint)' : personaColor(selectedPersonaId)};margin-bottom:4px;">
+              ${m.role === 'user' ? 'You' : escapeHtml(persona.name)}
+              <span style="font-weight:400;color:var(--ls-text-faint);margin-left:6px;">${relTime(m.ts)}</span>
+            </div>
+            <div style="font-size:13px;line-height:1.5;color:var(--ls-text);white-space:pre-wrap;">${escapeHtml(m.content)}</div>
+          </div>
+        `).join('')
+      : `<div style="color:var(--ls-text-faint);font-size:12px;padding:24px 0;text-align:center;">No conversation yet. Ask a question below.</div>`;
+
+    const isManager = persona.id === 'fxv:manager';
+    const auditBtn = isManager
+      ? `<button class="ls-btn" id="ls-spec-audit" style="margin-left:auto;" title="Programme Lead reviews the action backlog and recommends delete/done/keep for each. ~£0.01.">⚖ audit actions</button>`
+      : '';
+
+    body.innerHTML = `
+      <div class="ls-d-title" style="display:flex;align-items:center;gap:8px;">
+        <span class="ls-persona-dot" style="background:${personaColor(persona.id)};width:10px;height:10px;border-radius:50%;display:inline-block;"></span>
+        ${escapeHtml(persona.name)}
+        ${auditBtn}
+      </div>
+      <div style="color:var(--ls-text-faint);font-size:11px;margin:4px 0 14px;">${escapeHtml(persona.scope || '')}</div>
+      <div class="ls-d-sep"></div>
+      <div id="ls-spec-thread" style="max-height:60vh;overflow-y:auto;padding:12px 0;">${threadHtml}</div>
+      <div style="margin-top:8px;display:flex;gap:6px;align-items:flex-end;">
+        <textarea id="ls-spec-input" placeholder="Ask ${escapeHtml(persona.name)}…" rows="2"
+          style="flex:1;background:var(--ls-bg-elev);border:1px solid var(--ls-border);border-radius:6px;padding:8px 10px;color:var(--ls-text);font-family:inherit;font-size:13px;resize:none;outline:none;"></textarea>
+        <button class="ls-btn primary" id="ls-spec-send" style="height:38px;">Send</button>
+      </div>
+    `;
+
+    const ta = body.querySelector('#ls-spec-input');
+    const send = body.querySelector('#ls-spec-send');
+    const scrollBottom = () => {
+      const t = document.getElementById('ls-spec-thread');
+      if (t) t.scrollTop = t.scrollHeight;
+    };
+    scrollBottom();
+
+    const doSend = async () => {
+      const text = ta.value.trim();
+      if (!text || send.disabled) return;
+      ta.value = '';
+      send.disabled = true;
+      send.textContent = '…';
+      const t = personaChatThreads[selectedPersonaId] || (personaChatThreads[selectedPersonaId] = []);
+      t.push({ role: 'user', content: text, ts: Date.now() });
+      renderSpecialistsDetail();
+      try {
+        const history = t.slice(0, -1).map(m => ({ role: m.role, content: m.content }));
+        const useFullCodebase = localStorage.getItem('hive.fullCtx') === '1';
+        const res = await window.hive.consultAdvisor(selectedPersonaId, text, history, { useFullCodebase });
+        const reply = (res && (res.reply ?? res.text ?? res.content)) || (typeof res === 'string' ? res : 'No reply');
+        t.push({ role: 'assistant', content: reply, ts: Date.now() });
+      } catch (err) {
+        t.push({ role: 'assistant', content: `Error: ${err?.message ?? err}`, ts: Date.now() });
+      }
+      renderSpecialistsList();
+      renderSpecialistsDetail();
+    };
+    send.addEventListener('click', doSend);
+    ta.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); doSend(); }
+    });
+    ta.focus();
+
+    body.querySelector('#ls-spec-audit')?.addEventListener('click', runAuditFlow);
+  }
+
+  async function runAuditFlow() {
+    const auditBtn = document.getElementById('ls-spec-audit');
+    if (auditBtn) { auditBtn.disabled = true; auditBtn.textContent = '… auditing'; }
+    let result;
+    try {
+      result = await window.hive.auditActions();
+    } catch (err) {
+      flashToast(`Audit failed: ${err?.message ?? err}`);
+      if (auditBtn) { auditBtn.disabled = false; auditBtn.textContent = '⚖ audit actions'; }
+      return;
+    }
+    if (auditBtn) { auditBtn.disabled = false; auditBtn.textContent = '⚖ audit actions'; }
+    if (!result?.ok) {
+      flashToast(`Audit failed: ${result?.error ?? 'unknown error'}`);
+      return;
+    }
+    const items = result.items || [];
+    if (!items.length) {
+      flashToast('No recommendations — backlog looks clean.');
+      return;
+    }
+    // Make sure actions cache is populated so the modal can render row context.
+    if (!actions.length) await refreshActions();
+    showAuditModal(items);
+  }
+
+  function showAuditModal(items) {
+    document.getElementById('ls-audit-modal')?.remove();
+    const flagged = items.filter(i => i.recommendation !== 'keep');
+    const byId = id => actions.find(a => a.id === id);
+    const row = (i, idx) => {
+      const a = byId(i.id);
+      if (!a) return '';
+      const colors = { delete: '#ef4444', done: '#34d399', keep: '#8a8f98' };
+      const labels = { delete: 'DELETE', done: 'DONE', keep: 'KEEP' };
+      return `
+        <label style="display:grid;grid-template-columns:18px 60px 1fr;gap:10px;align-items:start;padding:10px 12px;border-bottom:1px solid var(--ls-border);cursor:pointer;">
+          <input type="checkbox" data-idx="${idx}" ${i.recommendation !== 'keep' ? 'checked' : ''} style="margin-top:3px;">
+          <span style="font-size:10px;font-weight:700;color:${colors[i.recommendation]};letter-spacing:0.05em;padding-top:2px;">${labels[i.recommendation]}</span>
+          <div>
+            <div style="font-size:13px;color:var(--ls-text);">HIV-${String(a.id).padStart(3,'0')} · ${escapeHtml(a.content)}</div>
+            <div style="font-size:11px;color:var(--ls-text-faint);margin-top:4px;">${escapeHtml(i.reason || '')}</div>
+          </div>
+        </label>
+      `;
+    };
+    const overlay = document.createElement('div');
+    overlay.id = 'ls-audit-modal';
+    overlay.style.cssText = `position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:100;display:flex;align-items:center;justify-content:center;`;
+    overlay.innerHTML = `
+      <div style="background:var(--ls-bg);border:1px solid var(--ls-border);border-radius:10px;width:720px;max-width:92vw;max-height:84vh;display:flex;flex-direction:column;box-shadow:0 24px 60px rgba(0,0,0,0.6);">
+        <div style="padding:16px 20px;border-bottom:1px solid var(--ls-border);display:flex;align-items:center;gap:12px;">
+          <div style="font-size:14px;font-weight:600;">Programme Lead — Actions audit</div>
+          <div style="color:var(--ls-text-faint);font-size:12px;">${flagged.length} of ${items.length} flagged</div>
+          <div style="flex:1;"></div>
+          <button class="ls-btn" id="ls-audit-toggle-all" type="button">Toggle all</button>
+        </div>
+        <div id="ls-audit-list" style="overflow-y:auto;flex:1;">
+          ${items.map(row).join('')}
+        </div>
+        <div style="padding:14px 20px;border-top:1px solid var(--ls-border);display:flex;gap:8px;justify-content:flex-end;">
+          <button class="ls-btn" id="ls-audit-cancel" type="button">Cancel</button>
+          <button class="ls-btn primary" id="ls-audit-apply" type="button">Apply selected</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    const close = () => overlay.remove();
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+    document.getElementById('ls-audit-cancel').addEventListener('click', close);
+    document.getElementById('ls-audit-toggle-all').addEventListener('click', () => {
+      const boxes = overlay.querySelectorAll('input[type="checkbox"]');
+      const anyUnchecked = Array.from(boxes).some(b => !b.checked);
+      boxes.forEach(b => { b.checked = anyUnchecked; });
+    });
+    document.getElementById('ls-audit-apply').addEventListener('click', async () => {
+      const applyBtn = document.getElementById('ls-audit-apply');
+      applyBtn.disabled = true;
+      applyBtn.textContent = '… applying';
+      const boxes = overlay.querySelectorAll('input[type="checkbox"]');
+      let deleted = 0, doneCount = 0;
+      for (const box of boxes) {
+        if (!box.checked) continue;
+        const i = items[Number(box.dataset.idx)];
+        if (!i) continue;
+        if (i.recommendation === 'delete') {
+          try { await window.hive.deleteAction(i.id); deleted++; } catch {}
+        } else if (i.recommendation === 'done') {
+          try { await window.hive.updateActionStatus(i.id, 'done'); doneCount++; } catch {}
+        }
+      }
+      close();
+      await refreshActions();
+      if (activeView === 'specialists') renderSpecialistsList();
+      flashToast(`Audit applied — ${deleted} deleted, ${doneCount} marked done.`);
     });
   }
 
@@ -3955,18 +4225,33 @@ window.__extractActionsFor = async (personaId, question, reply) => {
     document.body.classList.add('mode-fxv-advise');
   }
   document.querySelectorAll('.linear-shell .ls-nav-item[data-view]').forEach(el => {
-    el.addEventListener('click', () => {
+    el.addEventListener('click', async () => {
       const v = el.dataset.view;
       if (v === 'canvas') { setActiveNav('canvas'); return; }
       closeCanvasIfOpen();
       if (v === 'actions') { filter.status = 'active'; setActiveNav('actions'); refreshActions(); renderFilterChips(); return; }
       if (v === 'deploys') { setActiveNav('deploys'); document.getElementById('open-deploy')?.click(); return; }
-      // Specialists + Drafts still bridge to legacy shell until v3.0-γ
-      // ports them properly into Linear list views.
-      if (v === 'specialists' || v === 'drafts') {
+      // Specialists → native Linear list view (no modal, no shell swap).
+      if (v === 'specialists') {
         setActiveNav(v);
-        switchToLegacyShell();
-        flashToast(`Opening ${v} in legacy shell — "← Linear" or Ctrl+Shift+L returns here.`);
+        renderList();
+        renderDetail();
+        return;
+      }
+      // Drafts → open most recent draft folder in Explorer; no shell swap.
+      if (v === 'drafts') {
+        setActiveNav(v);
+        try {
+          const res = await window.hive.listDrafts();
+          const items = res?.drafts ?? res ?? [];
+          if (items.length) {
+            await window.hive.openDraftFolder(items[0].slug);
+          } else {
+            flashToast('No drafts yet — generate one with Ctrl-K → "Generate next draft".');
+          }
+        } catch (err) {
+          flashToast(`Drafts unavailable: ${err?.message ?? err}`);
+        }
         return;
       }
       flashToast(`${v} not wired yet.`);
@@ -3975,12 +4260,9 @@ window.__extractActionsFor = async (personaId, question, reply) => {
 
   document.getElementById('ls-new-action')?.addEventListener('click', createInlineAction);
 
-  // Cost click → open existing legacy cost modal by toggling to legacy briefly.
+  // Cost click → open cost modal as overlay; no shell swap.
   document.getElementById('ls-cost')?.addEventListener('click', () => {
-    document.body.classList.remove('mode-linear');
-    document.body.classList.add('mode-fxv-advise');
-    const wrap = document.getElementById('meta-cost-wrap');
-    if (wrap) wrap.click();
+    document.getElementById('meta-cost-wrap')?.click();
   });
 
   // ── Command palette ──────────────────────────────────────────────
@@ -4152,4 +4434,152 @@ window.__extractActionsFor = async (personaId, question, reply) => {
     refreshCost();
     setInterval(refreshCost, 30000);
   })();
+})();
+
+// ─── Hive Flow — run FXV in browser-mounted iPhone bezel ────────────────────
+(function flowMode() {
+  const btns = Array.from(document.querySelectorAll('.js-open-flow'));
+  if (!btns.length || !window.hive?.flowStart) return;
+
+  const DEFAULT_LABEL = '▶ flow';
+  const STARTING_LABEL = '… starting flow';
+  const READY_LABEL = '■ stop flow';
+
+  let lastLog = [];
+  const LOG_KEEP = 30;
+
+  function setLabel(state, message) {
+    btns.forEach(btn => {
+      if (state === 'idle') {
+        btn.textContent = DEFAULT_LABEL;
+        btn.style.color = '#34d399';
+        btn.title = 'Run FXV in a browser-mounted iPhone bezel. Click through the app without TestFlight.';
+      } else if (state === 'starting' || state === 'stopping') {
+        btn.textContent = state === 'starting' ? STARTING_LABEL : '… stopping flow';
+        btn.style.color = '#fbbf24';
+        btn.title = (message || 'spawning expo dev server') + '\n\nlast log:\n' + lastLog.slice(-6).join('\n');
+      } else if (state === 'ready') {
+        btn.textContent = READY_LABEL;
+        btn.style.color = '#34d399';
+        btn.title = 'FXV web is running at localhost:8081. Click to stop.';
+      } else if (state === 'error') {
+        btn.textContent = '⚠ flow error';
+        btn.style.color = '#ef4444';
+        btn.title = (message || 'expo failed') + '\n\nlast log:\n' + lastLog.slice(-8).join('\n');
+      }
+    });
+  }
+
+  window.hive.onFlowLog?.(({ line }) => {
+    lastLog.push(line);
+    if (lastLog.length > LOG_KEEP) lastLog.shift();
+  });
+
+  window.hive.onFlowStatus?.((snap) => {
+    setLabel(snap.state, snap.message);
+  });
+
+  // Sync initial state in case flow was already running on reload.
+  window.hive.flowStatus?.().then((snap) => snap && setLabel(snap.state, snap.message));
+
+  const handler = async (e) => {
+    e.preventDefault();
+    const snap = await window.hive.flowStatus();
+    if (snap.state === 'ready' || snap.state === 'starting') {
+      setLabel('stopping');
+      await window.hive.flowStop();
+      setLabel('idle');
+      return;
+    }
+    setLabel('starting', 'spawning expo start --web (first build ~60-120s)…');
+    const res = await window.hive.flowStart();
+    if (!res.ok) setLabel('error', res.error || 'unknown error');
+  };
+  btns.forEach(btn => btn.addEventListener('click', handler));
+})();
+
+// ─── Full-codebase advisor mode toggle ─────────────────────────────────────
+(function fullCtxToggle() {
+  const btn = document.getElementById('full-ctx-toggle');
+  if (!btn || !window.hive?.codebaseSnapshotStats) return;
+  function applyVisual() {
+    const on = localStorage.getItem('hive.fullCtx') === '1';
+    btn.style.color = on ? '#fbbf24' : '#8a8f98';
+    btn.textContent = on ? '⚡ full ctx ON' : '⚡ full ctx';
+  }
+  function fmtBytes(n) {
+    if (n < 1024) return `${n}B`;
+    if (n < 1024*1024) return `${(n/1024).toFixed(0)}KB`;
+    return `${(n/1024/1024).toFixed(2)}MB`;
+  }
+  applyVisual();
+  btn.addEventListener('click', async (e) => {
+    e.preventDefault();
+    const on = localStorage.getItem('hive.fullCtx') === '1';
+    if (!on) {
+      // Turning ON — fetch snapshot stats so user knows what's being indexed.
+      btn.textContent = '… indexing';
+      try {
+        const res = await window.hive.codebaseSnapshotStats();
+        const s = res?.stats;
+        if (s) {
+          const tokens = Math.round(s.bytes / 4 / 1000);
+          const ok = confirm(
+            `Enable full-codebase mode?\n\n` +
+            `${s.fileCount} files indexed (${fmtBytes(s.bytes)}, ~${tokens}k tokens).\n` +
+            `${s.truncated ? '⚠ Truncated to 700KB cap.\n' : ''}` +
+            `\nFirst reply will be ~£0.40 (cache write).\n` +
+            `Every reply after that: ~£0.04 (cache hit, ~5min TTL).\n` +
+            `Council: ~£0.50 instead of ~£0.05.\n\n` +
+            `Auto-rebuilds when FXV src/ files change.`,
+          );
+          if (!ok) { applyVisual(); return; }
+          localStorage.setItem('hive.fullCtx', '1');
+        } else {
+          alert('Snapshot failed to build. Check console.');
+        }
+      } catch (err) {
+        alert(`Snapshot error: ${err?.message ?? err}`);
+      }
+    } else {
+      localStorage.removeItem('hive.fullCtx');
+    }
+    applyVisual();
+  });
+})();
+
+// ─── Hive Bug Capture — screenshot the Flow preview into a new Action ──────
+(function bugCapture() {
+  const btn = document.getElementById('capture-bug-ls');
+  if (!btn || !window.hive?.captureBug) return;
+  function toast(msg, ok) {
+    const t = document.createElement('div');
+    t.textContent = msg;
+    t.style.cssText = `position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:${ok?'#1f3a2a':'#3a1f1f'};color:#fff;padding:10px 14px;border-radius:8px;font-size:13px;z-index:1000;box-shadow:0 6px 24px rgba(0,0,0,0.5);`;
+    document.body.appendChild(t);
+    setTimeout(() => { t.style.opacity = '0'; t.style.transition = 'opacity 0.3s'; setTimeout(() => t.remove(), 300); }, 2400);
+  }
+  btn.addEventListener('click', async (e) => {
+    e.preventDefault();
+    const note = window.prompt('Bug note (optional — what went wrong, what you were doing):', '');
+    if (note === null) return; // user cancelled
+    btn.textContent = '… capturing';
+    btn.style.color = '#fbbf24';
+    try {
+      const res = await window.hive.captureBug(note);
+      if (res?.ok) {
+        toast(`Bug captured — HIV-${String(res.actionId).padStart(3,'0')}. Screenshot saved.`, true);
+        // Refresh the Actions list if visible.
+        const refreshBtn = document.querySelector('.linear-shell .ls-nav-item[data-view="actions"]');
+        refreshBtn?.click();
+      } else {
+        toast(`Capture failed: ${res?.error || 'unknown error'}`, false);
+      }
+    } catch (err) {
+      toast(`Capture failed: ${err?.message ?? err}`, false);
+    } finally {
+      btn.textContent = '⚠ bug';
+      btn.style.color = '#ef4444';
+    }
+  });
 })();

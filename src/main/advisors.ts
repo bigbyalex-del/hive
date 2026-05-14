@@ -178,6 +178,26 @@ function specialistLabel(agentId: string): string {
   return agentId;
 }
 
+function buildFullContextSystemPrompt(persona: Persona): string {
+  const routes = persona.routes_to
+    ? '\n\nROUTING TABLE — when the question is outside your scope, route to the right agent:\n' +
+      Object.entries(persona.routes_to).map(([topic, target]) => `  • ${topic} → ${target}`).join('\n')
+    : '';
+  return `${persona.system_prompt}
+
+FULL-CODEBASE MODE — the COMPLETE current FXV mobile codebase is in your context above as the "FXV CODEBASE SNAPSHOT" block. Every TS/TSX/JSON file under mobile/src is included verbatim.
+
+CITATION FORMAT — strict:
+  • Cite as \`path:line\` — e.g. \`src/screens/dashboard/DashboardScreen.tsx:142\` or \`src/store/sessionLogStore.ts\` if line-level isn't meaningful.
+  • DO NOT use \`[N]\` numbered citations — there are no numbered sources in this mode.
+  • DO NOT use \`<sources>\` refusals like "I don't have a grounded source for this" — you DO have the source: the entire codebase is above. If something isn't in the snapshot, say "I don't see <file/function> in the snapshot" instead.
+
+REASONING:
+  • Trace cross-file relationships explicitly when they matter (imports, callers, store usage, prop flow). This is the whole point of having the full codebase.
+  • When asked about consequences of a change ("what breaks if I rename X"), enumerate every reference site you can see.
+  • Keep replies tight: 3–6 sentences unless asked for depth.${routes}`;
+}
+
 function buildSystemPrompt(persona: Persona, sources: Source[]): string {
   const sourcesBlock = sources.length === 0
     ? '<sources>\n(no relevant sources retrieved — you have no grounded material to cite for this question)\n</sources>'
@@ -254,6 +274,7 @@ export async function consultAdvisor(
   personaId: string,
   question: string,
   history: { role: 'user' | 'assistant'; content: string }[] = [],
+  opts: { useFullCodebase?: boolean } = {},
 ): Promise<ConsultResult> {
   const personasFile = loadPersonas();
   const persona = findPersona(personaId);
@@ -261,14 +282,25 @@ export async function consultAdvisor(
   const q = String(question ?? '').trim();
   if (!q) throw new Error('question is empty');
 
-  // Use the latest user turn for retrieval; if there's prior history, lightly
-  // append the previous user turn as context for the embedding query so
-  // pronouns ("what about it?") resolve to the original topic.
-  const lastUser = [...history].reverse().find(m => m.role === 'user');
-  const retrievalQuery = lastUser ? `${lastUser.content.slice(0, 200)}\n${q}` : q;
-  const sources = await recallForAdvisor(persona, personasFile.sharedAgentId, retrievalQuery, 6);
+  // Full-codebase mode: send the entire FXV source tree as a separately-cached
+  // system prefix. Skips retrieval — model sees every file every turn.
+  let cachedPrefix: string | undefined;
+  let sources: Source[] = [];
+  if (opts.useFullCodebase) {
+    const snap = await (await import('./codebaseSnapshot')).getSnapshot();
+    cachedPrefix = snap.text;
+  } else {
+    // Use the latest user turn for retrieval; if there's prior history, lightly
+    // append the previous user turn as context for the embedding query so
+    // pronouns ("what about it?") resolve to the original topic.
+    const lastUser = [...history].reverse().find(m => m.role === 'user');
+    const retrievalQuery = lastUser ? `${lastUser.content.slice(0, 200)}\n${q}` : q;
+    sources = await recallForAdvisor(persona, personasFile.sharedAgentId, retrievalQuery, 6);
+  }
 
-  const systemPrompt = buildSystemPrompt(persona, sources);
+  const systemPrompt = opts.useFullCodebase
+    ? buildFullContextSystemPrompt(persona)
+    : buildSystemPrompt(persona, sources);
   const provider = new AnthropicProvider();
 
   // Render history + new question as a single prompt. We don't need the full
@@ -287,15 +319,20 @@ export async function consultAdvisor(
 
   const first = await provider.run(model, {
     systemPrompt,
+    cachedPrefix,
     prompt,
     noTools: true,
     maxTurns: 1,
-  }, { _agentId: persona.id } as any);
+  }, { _agentId: persona.id + (opts.useFullCodebase ? ':full' : '') } as any);
   inputTokens += first.inputTokens;
   outputTokens += first.outputTokens;
 
   let reply = first.text;
-  const lint = lintCitations(reply, sources.length);
+  // Skip the [N]-citation linter in full-codebase mode — that mode uses
+  // file:line citations directly, not numbered <sources> entries.
+  const lint = opts.useFullCodebase
+    ? { ok: true, missing: [] as string[] }
+    : lintCitations(reply, sources.length);
   let citationMissingCount = lint.missing.length;
 
   if (!lint.ok && sources.length > 0) {
@@ -381,7 +418,7 @@ export interface CouncilResult {
   totalOutputTokens: number;
 }
 
-export async function runCouncil(question: string): Promise<CouncilResult> {
+export async function runCouncil(question: string, opts: { useFullCodebase?: boolean } = {}): Promise<CouncilResult> {
   const personas = loadPersonas().personas;
   // Skip Manager — it runs the synthesis at the end, not as a participant.
   // Page agents participate so the council sees in-app implementation views
@@ -390,7 +427,7 @@ export async function runCouncil(question: string): Promise<CouncilResult> {
 
   const results = await Promise.all(participants.map(async p => {
     try {
-      const r = await consultAdvisor(p.id, question, []);
+      const r = await consultAdvisor(p.id, question, [], { useFullCodebase: opts.useFullCodebase });
       return {
         personaId: p.id,
         personaName: p.name,
@@ -560,6 +597,60 @@ export async function runShipAudit(
   const overall: AuditResult['overall'] = hasRed ? 'red' : hasAmber ? 'amber' : 'green';
 
   return { ts: Date.now(), reports, overall };
+}
+
+// Programme Lead reviews the action backlog and recommends delete/done/keep
+// for each. Used by the Audit actions button in the Specialists chat rail.
+export interface ActionAuditItem {
+  id: number;
+  recommendation: 'delete' | 'done' | 'keep';
+  reason: string;
+}
+export async function auditActions(
+  actions: { id: number; content: string; status: string; priority: string; personaId?: string | null; projectId?: number | null; ts: number; updatedAt: number }[],
+): Promise<ActionAuditItem[]> {
+  if (!actions.length) return [];
+  const persona = findPersona('fxv:manager');
+  const provider = new AnthropicProvider();
+  const systemPrompt =
+    (persona?.system_prompt ?? 'You are the FXV Programme Lead.') +
+    `\n\nYou are auditing the user's (Alex's) action backlog. For each action, classify it as one of:\n` +
+    `- "delete" — duplicate, irrelevant, stale (vague + >14d old with no movement), or noise.\n` +
+    `- "done" — clearly already complete from FXV's current shipped state.\n` +
+    `- "keep" — real, current, distinct action worth working on.\n\n` +
+    `Be conservative: only flag delete if you're confident it's truly dead weight.\n\n` +
+    `Return ONLY a JSON array. Each object: {"id": <number>, "r": "delete"|"done"|"keep", "why": "<under 80 chars>"}. No markdown, no prose, no commentary.`;
+  const lines = actions.map(a => {
+    const days = Math.floor((Date.now() - a.ts) / 86400000);
+    const pid = a.personaId ? ` (${a.personaId})` : '';
+    return `${a.id}. [${a.status}/${a.priority}, ${days}d${pid}] ${a.content}`;
+  }).join('\n');
+  let result;
+  try {
+    result = await provider.run('claude-sonnet-4-6', {
+      systemPrompt,
+      prompt: `Audit these ${actions.length} actions:\n\n${lines}\n\nReturn a JSON array with an entry for every action. No markdown.`,
+      noTools: true,
+      maxTurns: 1,
+    }, { _agentId: 'actions-audit' } as any);
+  } catch {
+    return [];
+  }
+  const match = result.text.trim().match(/\[[\s\S]*\]/);
+  if (!match) return [];
+  try {
+    const parsed = JSON.parse(match[0]);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((c: any) => ({
+        id: Number(c.id),
+        recommendation: (c.r === 'delete' || c.r === 'done' || c.r === 'keep') ? c.r : 'keep',
+        reason: String(c.why || '').slice(0, 200),
+      }))
+      .filter((c): c is ActionAuditItem => Number.isFinite(c.id));
+  } catch {
+    return [];
+  }
 }
 
 // Extract concrete action items from an advisor reply. Lightweight Haiku

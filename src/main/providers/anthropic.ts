@@ -452,12 +452,20 @@ export class AnthropicProvider implements Provider {
           // Send the system prompt as a content block with ephemeral cache_control
           // so subsequent turns in this run hit the prompt cache (50% read cost,
           // ~5min TTL). Tools array is also stable across turns — same benefit.
+          // When cachedPrefix is set (full-codebase mode), it gets its own cache
+          // breakpoint placed FIRST so the same snapshot can be reused across
+          // multiple personas (Council, Ship Audit) — one write, many reads.
+          const sysBlocks: any[] = [];
+          if (opts.cachedPrefix) {
+            sysBlocks.push({ type: 'text', text: opts.cachedPrefix, cache_control: { type: 'ephemeral' } });
+          }
+          if (opts.systemPrompt) {
+            sysBlocks.push({ type: 'text', text: opts.systemPrompt, cache_control: { type: 'ephemeral' } });
+          }
           resp = await client.messages.create({
             model,
             max_tokens: 4096,
-            system: opts.systemPrompt
-              ? [{ type: 'text', text: opts.systemPrompt, cache_control: { type: 'ephemeral' } }]
-              : undefined,
+            system: sysBlocks.length ? sysBlocks : undefined,
             tools: apiTools.length
               ? apiTools.map((t, i) => i === apiTools.length - 1
                   ? { ...t, cache_control: { type: 'ephemeral' } }
