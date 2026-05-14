@@ -50,8 +50,9 @@
   let selectedPersonaId = 'fxv:manager';
   let messages = [];   // [{ role, content, persona?, provider?, model?, toolCalls?, ts }]
   let sending = false;
-  let recognition = null;
-  let recogActive = false;
+  let mediaRecorder = null;
+  let recordedChunks = [];
+  let recording = false;
 
   async function loadAdvisors() {
     try {
@@ -280,43 +281,70 @@
     INPUT.style.height = Math.min(160, INPUT.scrollHeight) + 'px';
   }
 
-  // Mic input — browser SpeechRecognition (Chrome/Edge ships it; Electron uses Chromium so it's available).
+  // Mic input — records via MediaRecorder, transcribes via OpenAI Whisper
+  // through the existing TranscribeAudio IPC. Browser SpeechRecognition is
+  // unreliable in Electron (needs Google's cloud key, not shipped).
   function initMic() {
-    const Ctor = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!Ctor) {
+    if (!navigator.mediaDevices?.getUserMedia || typeof window.MediaRecorder !== 'function') {
       MIC_BTN.style.display = 'none';
       return;
     }
-    recognition = new Ctor();
-    recognition.lang = 'en-GB';
-    recognition.interimResults = true;
-    recognition.continuous = false;
-    let baseValue = '';
-    recognition.onresult = (e) => {
-      let txt = '';
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        txt += e.results[i][0].transcript;
-      }
-      INPUT.value = (baseValue ? baseValue + ' ' : '') + txt;
-      autoresize();
-    };
-    recognition.onstart = () => {
-      recogActive = true;
-      baseValue = INPUT.value.trim();
+    MIC_BTN.addEventListener('click', toggleRecord);
+  }
+
+  async function toggleRecord() {
+    if (recording) {
+      stopRecord();
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      recordedChunks = [];
+      const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : (MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : '');
+      mediaRecorder = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
+      mediaRecorder.ondataavailable = (e) => { if (e.data && e.data.size > 0) recordedChunks.push(e.data); };
+      mediaRecorder.onstop = async () => {
+        const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+        stream.getTracks().forEach(t => t.stop());
+        recording = false;
+        MIC_BTN.classList.remove('active');
+        MIC_BTN.classList.add('busy');
+        const baseValue = INPUT.value.trim();
+        try {
+          const buf = await blob.arrayBuffer();
+          const res = await window.hive.transcribeAudio(buf, blob.type);
+          if (res?.ok === false) {
+            console.error('[chat] transcribe error:', res.error);
+            alert(`Transcribe failed: ${res.error}`);
+          } else {
+            const text = String(res?.text ?? '').trim();
+            if (text) {
+              INPUT.value = (baseValue ? baseValue + ' ' : '') + text;
+              autoresize();
+              INPUT.focus();
+            }
+          }
+        } catch (err) {
+          console.error('[chat] transcribe failed:', err);
+          alert(`Transcribe failed: ${err?.message ?? err}`);
+        }
+        MIC_BTN.classList.remove('busy');
+      };
+      mediaRecorder.start();
+      recording = true;
       MIC_BTN.classList.add('active');
-    };
-    recognition.onend = () => {
-      recogActive = false;
-      MIC_BTN.classList.remove('active');
-    };
-    recognition.onerror = () => {
-      recogActive = false;
-      MIC_BTN.classList.remove('active');
-    };
-    MIC_BTN.addEventListener('click', () => {
-      if (recogActive) recognition.stop();
-      else { try { recognition.start(); } catch {} }
-    });
+    } catch (err) {
+      console.error('[chat] mic permission denied:', err);
+      alert(`Mic unavailable: ${err?.message ?? err}\n\nIn Windows: Settings → Privacy → Microphone → allow desktop apps.`);
+    }
+  }
+
+  function stopRecord() {
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+      mediaRecorder.stop();
+    }
   }
 
   function escapeHtml(s) {
