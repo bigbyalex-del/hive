@@ -1749,7 +1749,9 @@ body.mode-fxv-advise .footer .key-advise { display: inline; }
    Visible only under body.mode-linear; everything else hides.
 ═══════════════════════════════════════════════════════════════════ */
 
-.linear-shell {
+/* Variables hoisted to body.mode-linear so sibling shells (canvas, chat,
+   deploys) that live outside `.linear-shell` can still resolve them. */
+body.mode-linear {
   --ls-bg:          #08090A;
   --ls-surface:     #101113;
   --ls-surface-2:   #16171A;
@@ -1765,6 +1767,8 @@ body.mode-fxv-advise .footer .key-advise { display: inline; }
   --ls-amber:       #E2A03F;
   --ls-red:         #EB5757;
   --ls-row-h:       32px;
+}
+.linear-shell {
   display: none;
 }
 body.mode-linear .linear-shell {
@@ -1785,7 +1789,7 @@ body.mode-linear .linear-shell {
 /* Hide everything that's not the linear shell when in mode-linear,
    EXCEPT modals — those are overlays and should remain available so
    sidebar nav can trigger them without forcing a shell swap. */
-body.mode-linear > *:not(.linear-shell):not(.ls-cmdpalette):not(.ls-canvas-shell):not([id$="-modal"]):not(script) {
+body.mode-linear > *:not(.linear-shell):not(.ls-cmdpalette):not(.ls-canvas-shell):not(.ls-chat-shell):not(.ls-deploys-shell):not([id$="-modal"]):not(script) {
   display: none !important;
 }
 body.mode-linear > .ls-cmdpalette { z-index: 50; }
@@ -2908,7 +2912,7 @@ body.mode-linear.canvas-active .ls-detail { display: none; }
 
 .ls-chat-shell {
   position: fixed;
-  inset: 44px 0 0 220px;  /* below topbar, right of sidebar */
+  inset: 44px 0 0 232px;  /* below topbar, right of sidebar */
   background: var(--ls-bg);
   display: flex;
   z-index: 14;
