@@ -2920,11 +2920,7 @@ body.mode-linear.canvas-active .ls-detail { display: none; }
   color: var(--ls-text);
 }
 .ls-chat-rail {
-  width: 220px;
-  flex-shrink: 0;
-  border-right: 1px solid var(--ls-border);
-  padding: 14px 10px;
-  overflow-y: auto;
+  display: none;  /* deprecated — persona pick is now in the header */
 }
 .ls-chat-rail-h {
   font-size: 10px;
@@ -2991,13 +2987,69 @@ body.mode-linear.canvas-active .ls-detail { display: none; }
   padding: 12px 18px;
   border-bottom: 1px solid var(--ls-border);
 }
-.ls-chat-persona-active {
+.ls-chat-persona-pill {
   display: flex;
   align-items: center;
   gap: 8px;
+  background: var(--ls-surface);
+  border: 1px solid var(--ls-border);
+  border-radius: 20px;
+  padding: 5px 12px 5px 10px;
+  cursor: pointer;
+  font-family: inherit;
+  color: var(--ls-text);
+  font-size: 12px;
 }
-.ls-chat-persona-name { font-size: 13px; font-weight: 600; }
+.ls-chat-persona-pill:hover { background: var(--ls-surface-hov); }
+.ls-chat-persona-name { font-size: 12px; font-weight: 600; }
 .ls-chat-persona-title { font-size: 11px; color: var(--ls-text-faint); }
+
+.ls-chat-persona-dropdown {
+  position: fixed;
+  background: var(--ls-surface);
+  border: 1px solid var(--ls-border);
+  border-radius: 8px;
+  padding: 6px;
+  min-width: 280px;
+  max-height: 400px;
+  overflow-y: auto;
+  box-shadow: 0 12px 36px rgba(0,0,0,0.6);
+  z-index: 240;
+  font-family: 'Inter', system-ui, sans-serif;
+}
+.ls-chat-persona-dropdown .ls-chat-rail-sub {
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ls-text-faint);
+  padding: 8px 8px 4px;
+}
+.ls-chat-persona-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 10px;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  cursor: pointer;
+  color: var(--ls-text-dim);
+  font-family: inherit;
+  font-size: 12px;
+  text-align: left;
+}
+.ls-chat-persona-row:hover { background: var(--ls-surface-hov); color: var(--ls-text); }
+.ls-chat-persona-row.active { background: var(--ls-surface-hov); color: var(--ls-text); }
+.ls-chat-persona-scope {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--ls-text-faint);
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .ls-chat-spacer { flex: 1; }
 .ls-chat-tools-toggle {
   display: flex;

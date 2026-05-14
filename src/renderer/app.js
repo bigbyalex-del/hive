@@ -3687,20 +3687,18 @@ window.__extractActionsFor = async (personaId, question, reply) => {
         (lead ? renderRow(lead) : '') +
         specialists.map(renderRow).join('');
       personaList.querySelectorAll('[data-persona]').forEach(el => {
-        el.addEventListener('click', async () => {
+        el.addEventListener('click', async (ev) => {
           const pid = el.dataset.persona;
-          // In Specialists view: open chat for that persona.
-          // In any other view: filter Actions by persona (existing behaviour).
-          if (activeView === 'specialists') {
-            selectedPersonaId = pid;
-            await loadPersonaChat(pid);
-            renderSpecialistsList();
-            renderSpecialistsDetail();
-          } else {
+          // Shift+click → filter Actions list by persona (escape hatch
+          // for the old behaviour). Plain click → open Chat panel with
+          // that persona so the unified surface stays in charge.
+          if (ev.shiftKey) {
             filter.personaId = filter.personaId === pid ? null : pid;
             renderFilterChips();
             renderList();
+            return;
           }
+          window.__lsChat?.openWithPersona?.(pid);
         });
       });
     }

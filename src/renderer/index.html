@@ -760,20 +760,16 @@
        list actions). Voice in (mic) + voice out (TTS).
   ═══════════════════════════════════════════════════════════════ -->
   <div class="ls-chat-shell" id="ls-chat-shell" style="display:none;">
-    <div class="ls-chat-rail">
-      <div class="ls-chat-rail-h">Persona</div>
-      <div class="ls-chat-persona-list" id="ls-chat-persona-list"></div>
-      <div class="ls-chat-rail-h">Conversation</div>
-      <button class="ls-chat-new" id="ls-chat-new">+ New conversation</button>
-    </div>
     <div class="ls-chat-main">
       <div class="ls-chat-header">
-        <div class="ls-chat-persona-active" id="ls-chat-persona-active">
+        <button class="ls-chat-persona-pill" id="ls-chat-persona-pill" title="Switch persona">
           <span class="ls-chat-persona-dot" id="ls-chat-persona-dot"></span>
           <span class="ls-chat-persona-name" id="ls-chat-persona-name">Programme Lead</span>
-          <span class="ls-chat-persona-title" id="ls-chat-persona-title"></span>
-        </div>
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <span class="ls-chat-persona-title" id="ls-chat-persona-title"></span>
         <div class="ls-chat-spacer"></div>
+        <button class="ls-chat-new" id="ls-chat-new" title="Start a fresh conversation">+ New</button>
         <label class="ls-chat-tools-toggle" title="When enabled, the persona can read FXV files, fetch the web, and list Hive Actions to ground its answer. Adds 1–2s and ~£0.001 per tool call.">
           <input type="checkbox" id="ls-chat-tools" checked />
           <span>Tools</span>

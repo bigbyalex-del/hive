@@ -16,8 +16,8 @@
   const SHELL = document.getElementById('ls-chat-shell');
   if (!SHELL) return;
 
-  const RAIL_PERSONAS = document.getElementById('ls-chat-persona-list');
   const NEW_BTN = document.getElementById('ls-chat-new');
+  const PERSONA_PILL = document.getElementById('ls-chat-persona-pill');
   const HEADER_DOT = document.getElementById('ls-chat-persona-dot');
   const HEADER_NAME = document.getElementById('ls-chat-persona-name');
   const HEADER_TITLE = document.getElementById('ls-chat-persona-title');
@@ -60,7 +60,6 @@
       const res = await window.hive.listAdvisors();
       advisors = res?.advisors ?? res ?? [];
     } catch { advisors = []; }
-    renderRail();
     setPersona(selectedPersonaId);
   }
 
@@ -72,7 +71,18 @@
     renderProviderSel();
   }
 
-  function renderRail() {
+  // Persona dropdown (replaces the old left rail). Pops up below the pill.
+  let pillPickerEl = null;
+  function closePillPicker() {
+    if (pillPickerEl) { pillPickerEl.remove(); pillPickerEl = null; }
+    document.removeEventListener('mousedown', onPillPickerOutside, true);
+  }
+  function onPillPickerOutside(e) {
+    if (!pillPickerEl) return;
+    if (!pillPickerEl.contains(e.target) && !PERSONA_PILL.contains(e.target)) closePillPicker();
+  }
+  function openPillPicker() {
+    if (pillPickerEl) { closePillPicker(); return; }
     const lead = advisors.find(a => a.id === 'fxv:manager');
     const specs = advisors.filter(a => !a.isPage && a.id !== 'fxv:manager');
     const pages = advisors.filter(a => a.isPage);
@@ -81,18 +91,31 @@
       { label: 'Specialists', items: specs },
       { label: 'Pages', items: pages },
     ];
-    RAIL_PERSONAS.innerHTML = sections.map(s => `
-      <div class="ls-chat-rail-sub">${escapeHtml(s.label)}</div>
-      ${s.items.map(a => `
-        <button class="ls-chat-persona-row" data-id="${escapeHtml(a.id)}">
-          <span class="ls-chat-persona-dot" style="background:${PERSONA_COLOR[a.id] || '#8A8F98'};"></span>
-          <span class="ls-chat-persona-name-cell">${escapeHtml(a.name)}</span>
-        </button>
-      `).join('')}
-    `).join('');
-    RAIL_PERSONAS.querySelectorAll('[data-id]').forEach(btn => {
-      btn.addEventListener('click', () => setPersona(btn.dataset.id));
+    const renderRow = (a) => {
+      const cls = a.id === selectedPersonaId ? ' active' : '';
+      const dot = PERSONA_COLOR[a.id] || '#8A8F98';
+      const scope = (a.title || a.scope || '').slice(0, 40);
+      return `<button class="ls-chat-persona-row${cls}" data-id="${escapeHtml(a.id)}"><span class="ls-chat-persona-dot" style="background:${dot};"></span><span class="ls-chat-persona-name-cell">${escapeHtml(a.name)}</span><span class="ls-chat-persona-scope">${escapeHtml(scope)}</span></button>`;
+    };
+    const renderSection = (s) => {
+      if (!s.items.length) return '';
+      return `<div class="ls-chat-rail-sub">${escapeHtml(s.label)}</div>` + s.items.map(renderRow).join('');
+    };
+    const el = document.createElement('div');
+    el.className = 'ls-chat-persona-dropdown';
+    el.innerHTML = sections.map(renderSection).join('');
+    document.body.appendChild(el);
+    const r = PERSONA_PILL.getBoundingClientRect();
+    el.style.left = r.left + 'px';
+    el.style.top = (r.bottom + 4) + 'px';
+    pillPickerEl = el;
+    el.querySelectorAll('[data-id]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        setPersona(btn.dataset.id);
+        closePillPicker();
+      });
     });
+    setTimeout(() => document.addEventListener('mousedown', onPillPickerOutside, true), 0);
   }
 
   function renderProviderSel() {
@@ -125,10 +148,7 @@
     HEADER_NAME.textContent = p.name;
     HEADER_TITLE.textContent = p.title ?? '';
     HEADER_DOT.style.background = PERSONA_COLOR[id] || '#8A8F98';
-    INPUT.placeholder = `Ask ${p.name} anything…`;
-    RAIL_PERSONAS.querySelectorAll('[data-id]').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.id === id);
-    });
+    INPUT.placeholder = `Ask ${p.name} anything…  type @ to mention a specialist`;
   }
 
   function newConversation() {
@@ -455,7 +475,16 @@
   }
   function isVisible() { return SHELL.style.display !== 'none'; }
 
-  window.__lsChat = { open, close, toggle, isVisible };
+  function openWithPersona(personaId) {
+    if (personaId && advisors.length) setPersona(personaId);
+    else if (personaId) {
+      // Advisors not yet loaded — set pending and let loadAdvisors apply
+      selectedPersonaId = personaId;
+    }
+    open();
+  }
+
+  window.__lsChat = { open, close, toggle, isVisible, openWithPersona };
 
   if (FAB) FAB.addEventListener('click', toggle);
 
@@ -562,6 +591,7 @@
   // Event wiring
   SEND_BTN.addEventListener('click', send);
   COUNCIL_BTN.addEventListener('click', council);
+  PERSONA_PILL.addEventListener('click', openPillPicker);
   INPUT.addEventListener('keydown', (e) => {
     if (mentionPickerEl) {
       if (e.key === 'ArrowDown') {

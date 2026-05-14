@@ -16,7 +16,7 @@ import * as os from 'os';
 import { ToolDef, ProviderName, RunOptions } from './providers/types';
 import { getProvider, listProviders } from './providers/registry';
 import { loadPersonas } from './advisors';
-import { listActions } from './db';
+import { listActions, updateAction, deleteAction, getAction } from './db';
 
 const dynamicImport = new Function('m', 'return import(m)') as (m: string) => Promise<any>;
 const GENERATED_IMAGES_DIR = path.join(os.homedir(), '.hive', 'generated-images');
@@ -295,6 +295,44 @@ Always ask the user before generating — don't use speculatively.`,
         ).join('\n');
       },
     },
+    {
+      name: 'hive_action_update_status',
+      description: 'Update the status of a Hive Action by id. Use this to mark an action done (when it no longer reflects open work) or cancelled (when it\'s no longer relevant). Quote the id from hive_actions. Always state which actions you\'re changing and why in your reply.',
+      schema: {
+        type: 'object',
+        properties: {
+          id: { type: 'number', description: 'action id from hive_actions' },
+          status: { type: 'string', enum: ['todo', 'in_progress', 'in_review', 'blocked', 'done', 'cancelled'], description: 'new status' },
+        },
+        required: ['id', 'status'],
+      },
+      run: async ({ id, status }) => {
+        if (typeof id !== 'number') throw new Error('id must be a number');
+        const cur = getAction(id);
+        if (!cur) throw new Error(`action #${id} not found`);
+        const prev = cur.status;
+        updateAction(id, { status: status as any });
+        return `Updated #${id}: ${prev} → ${status}. Content: "${cur.content.slice(0, 120)}"`;
+      },
+    },
+    {
+      name: 'hive_action_delete',
+      description: 'Permanently delete a Hive Action by id. Use ONLY when an action is genuinely irrelevant or a duplicate — prefer marking cancelled when in doubt (undoable, delete is not). Quote the id from hive_actions. Always state which actions you\'re deleting and why in your reply.',
+      schema: {
+        type: 'object',
+        properties: {
+          id: { type: 'number', description: 'action id from hive_actions' },
+        },
+        required: ['id'],
+      },
+      run: async ({ id }) => {
+        if (typeof id !== 'number') throw new Error('id must be a number');
+        const cur = getAction(id);
+        if (!cur) throw new Error(`action #${id} not found`);
+        deleteAction(id);
+        return `Deleted #${id}. Was: [${cur.status}] "${cur.content.slice(0, 120)}"`;
+      },
+    },
   ];
 }
 
@@ -337,13 +375,22 @@ export async function chatWithAdvisor(req: ChatRequest): Promise<ChatResult> {
   const systemPrompt = `You are ${persona.name}, ${persona.title}.
 Your scope: ${persona.scope}
 
-You are in a live conversation with the user. You have access to read-only tools:
+You are in a live conversation with the user. You have access to tools:
+
+Read-only:
 - fxv_read: read a file from the FXV codebase
 - fxv_grep: grep for a pattern in the FXV codebase
-- web_fetch: GET a URL (fxvperformance.com, GitHub, docs)
+- web_fetch: GET a URL (fxvperformance.com, GitHub, docs, PubMed)
 - hive_actions: list open Actions in Hive
 
-Use tools when answering would benefit from live data. Don't tool-call gratuitously — only when the question can't be answered without it. Cite tool outputs by file path or URL. Keep replies conversational and concise (3–6 sentences unless the user asks for depth). If you don't have grounded info, say so plainly — don't guess.`;
+Image generation (asks user first):
+- generate_image: produce a PNG via OpenAI / Flux / Imagen. Saves to ~/.hive/generated-images/.
+
+Action management (use carefully):
+- hive_action_update_status: change an action's status (todo, in_progress, done, cancelled, etc.)
+- hive_action_delete: permanently remove an action
+
+Use tools when answering would benefit from live data. Don't tool-call gratuitously. When changing or deleting Actions, ALWAYS state which ones you're touching and why so the user can see the reasoning before/while you act. Prefer "cancelled" over delete when in doubt — delete is not undoable. Cite tool outputs by file path / URL / action id. Keep replies conversational and concise (3–6 sentences unless the user asks for depth). If you don't have grounded info, say so plainly — don't guess.`;
 
   const tools: ToolDef[] = req.enableTools !== false ? chatTools() : [];
 
