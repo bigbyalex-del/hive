@@ -355,6 +355,13 @@
 
   // Public API
   let opened = false;
+  const FAB = document.getElementById('ls-chat-fab');
+
+  function syncFab() {
+    if (!FAB) return;
+    FAB.classList.toggle('chat-open', isVisible());
+    FAB.title = isVisible() ? 'Close chat (Ctrl+Shift+H or Esc)' : 'Chat Hive (Ctrl+Shift+H)';
+  }
   function open() {
     SHELL.style.display = '';
     if (!opened) {
@@ -363,14 +370,43 @@
       loadProviders();
       initMic();
     }
+    syncFab();
     setTimeout(() => INPUT.focus(), 0);
   }
   function close() {
     SHELL.style.display = 'none';
+    syncFab();
+  }
+  function toggle() {
+    if (isVisible()) close();
+    else open();
   }
   function isVisible() { return SHELL.style.display !== 'none'; }
 
-  window.__lsChat = { open, close, isVisible };
+  window.__lsChat = { open, close, toggle, isVisible };
+
+  if (FAB) FAB.addEventListener('click', toggle);
+
+  // Global keyboard shortcut: Ctrl+Shift+H toggles chat from anywhere.
+  // Esc closes chat when it's the topmost surface.
+  document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && e.shiftKey && (e.key === 'H' || e.key === 'h')) {
+      e.preventDefault();
+      toggle();
+      return;
+    }
+    if (e.key === 'Escape' && isVisible()) {
+      // Don't steal Esc from a focused dropdown / modal — only close
+      // chat if the active focus is inside chat shell.
+      if (document.activeElement && SHELL.contains(document.activeElement)) {
+        close();
+      } else if (!document.querySelector('[id$="-modal"][style*="display: flex"]')) {
+        close();
+      }
+    }
+  });
+
+  syncFab();
 
   // Event wiring
   SEND_BTN.addEventListener('click', send);

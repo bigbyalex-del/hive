@@ -725,6 +725,16 @@
   </div>
 
   <!-- ═══════════════════════════════════════════════════════════════
+       GLOBAL CHAT FAB
+       Always-visible bottom-right button that toggles the Chat
+       panel from any view. "Talk to agents no matter where I am."
+  ═══════════════════════════════════════════════════════════════ -->
+  <button class="ls-chat-fab" id="ls-chat-fab" title="Chat Hive (Ctrl+Shift+H)" aria-label="Open chat">
+    <svg class="ls-chat-fab-ico-open" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+    <svg class="ls-chat-fab-ico-close" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+  </button>
+
+  <!-- ═══════════════════════════════════════════════════════════════
        DEPLOYS VIEW (v3.0-δ)
        Native Linear panel listing deploy history with per-row
        commit-range expander. "+ New deploy" button still hooks the

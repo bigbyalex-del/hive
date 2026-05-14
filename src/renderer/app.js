@@ -4276,7 +4276,7 @@ window.__extractActionsFor = async (personaId, question, reply) => {
         window.__lsChat?.open?.();
         return;
       }
-      window.__lsChat?.close?.();
+      // Don't auto-close chat — it's the persistent overlay (FAB or Esc closes it).
       if (v === 'deploys') {
         setActiveNav('deploys');
         window.__lsDeploys?.open?.();

@@ -1789,7 +1789,7 @@ body.mode-linear .linear-shell {
 /* Hide everything that's not the linear shell when in mode-linear,
    EXCEPT modals — those are overlays and should remain available so
    sidebar nav can trigger them without forcing a shell swap. */
-body.mode-linear > *:not(.linear-shell):not(.ls-cmdpalette):not(.ls-canvas-shell):not(.ls-chat-shell):not(.ls-deploys-shell):not([id$="-modal"]):not(script) {
+body.mode-linear > *:not(.linear-shell):not(.ls-cmdpalette):not(.ls-canvas-shell):not(.ls-chat-shell):not(.ls-deploys-shell):not(.ls-chat-fab):not([id$="-modal"]):not(script) {
   display: none !important;
 }
 body.mode-linear > .ls-cmdpalette { z-index: 50; }
@@ -3183,6 +3183,40 @@ body.mode-linear.canvas-active .ls-detail { display: none; }
 }
 .ls-chat-send:hover { filter: brightness(1.1); }
 .ls-chat-send:disabled { opacity: 0.5; cursor: default; }
+
+/* Global Chat FAB — always-visible toggle to open chat from any view */
+.ls-chat-fab {
+  position: fixed;
+  right: 22px;
+  bottom: 22px;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--ls-accent, #c084fc);
+  color: #08090A;
+  border: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.45), 0 0 0 1px rgba(0,0,0,0.25);
+  z-index: 99;
+  transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease;
+  font-family: inherit;
+}
+.ls-chat-fab:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.55), 0 0 0 1px rgba(0,0,0,0.25);
+  filter: brightness(1.05);
+}
+.ls-chat-fab:active { transform: translateY(0); }
+.ls-chat-fab.chat-open {
+  background: var(--ls-surface, #101113);
+  color: var(--ls-text, #F7F8F8);
+  box-shadow: 0 6px 20px rgba(0,0,0,0.55), 0 0 0 1px var(--ls-border, #1F2023);
+}
+.ls-chat-fab.chat-open .ls-chat-fab-ico-open { display: none; }
+.ls-chat-fab.chat-open .ls-chat-fab-ico-close { display: block !important; }
 
 /* ════════════════════════════════════════════════════════════════════
    DEPLOYS VIEW (v3.0-δ)
