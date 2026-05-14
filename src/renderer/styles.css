@@ -2778,3 +2778,127 @@ body.mode-linear.canvas-active .ls-detail { display: none; }
 .ls-agent-picker-name { font-size: 12px; font-weight: 500; }
 .ls-agent-picker-scope { margin-left: auto; font-size: 10px; color: var(--ls-text-faint); }
 
+/* Canvas chat — Ask input popover */
+.ls-ask-input {
+  position: fixed;
+  width: 320px;
+  background: var(--ls-surface);
+  border: 1px solid var(--ls-border);
+  border-radius: 8px;
+  padding: 10px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+  z-index: 220;
+  font-family: 'Inter', system-ui, sans-serif;
+}
+.ls-ask-input-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--ls-text-dim);
+  margin-bottom: 8px;
+}
+.ls-ask-input-persona { font-weight: 600; color: var(--ls-text); }
+.ls-ask-input-topic {
+  margin-left: auto;
+  color: var(--ls-text-faint);
+  font-size: 10px;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ls-ask-input-ta {
+  width: 100%;
+  resize: vertical;
+  min-height: 60px;
+  background: var(--ls-bg);
+  border: 1px solid var(--ls-border);
+  border-radius: 5px;
+  padding: 7px 9px;
+  color: var(--ls-text);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+  box-sizing: border-box;
+}
+.ls-ask-input-ta:focus { outline: none; border-color: var(--ls-text-dim); }
+.ls-ask-input-hint {
+  margin-top: 6px;
+  font-size: 10px;
+  color: var(--ls-text-faint);
+}
+
+/* Canvas chat — reply expand panel */
+.ls-reply-panel {
+  position: fixed;
+  top: 60px;
+  right: 20px;
+  width: 380px;
+  max-height: calc(100vh - 100px);
+  overflow-y: auto;
+  background: var(--ls-surface);
+  border: 1px solid var(--ls-border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  box-shadow: 0 12px 36px rgba(0,0,0,0.65);
+  z-index: 230;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 13px;
+  color: var(--ls-text);
+}
+.ls-reply-panel-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--ls-border-soft);
+  margin-bottom: 10px;
+}
+.ls-reply-panel-name { font-weight: 600; font-size: 12px; }
+.ls-reply-panel-ts { margin-left: auto; font-size: 10px; color: var(--ls-text-faint); }
+.ls-reply-panel-close {
+  background: transparent;
+  border: 0;
+  color: var(--ls-text-faint);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+.ls-reply-panel-close:hover { color: var(--ls-text); }
+.ls-reply-panel-q-label,
+.ls-reply-panel-a-label {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ls-text-faint);
+  margin-bottom: 4px;
+}
+.ls-reply-panel-a-label { margin-top: 12px; }
+.ls-reply-panel-q {
+  font-style: italic;
+  color: var(--ls-text-dim);
+  white-space: pre-wrap;
+}
+.ls-reply-panel-a {
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+.ls-reply-panel-actions {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--ls-border-soft);
+}
+.ls-reply-panel-followup {
+  background: var(--ls-surface-hov);
+  border: 1px solid var(--ls-border);
+  color: var(--ls-text);
+  border-radius: 5px;
+  padding: 6px 11px;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.ls-reply-panel-followup:hover { background: var(--ls-border); }
+

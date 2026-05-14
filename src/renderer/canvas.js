@@ -584,6 +584,15 @@
     rect.on('dblclick dbltap', onEdit);
     text.on('dblclick dbltap', onEdit);
 
+    // Right-click → canvas-chat Ask flow
+    group.on('contextmenu', (e) => {
+      e.cancelBubble = true;
+      if (e.evt) { e.evt.preventDefault(); }
+      const cx = e.evt?.clientX ?? 0;
+      const cy = e.evt?.clientY ?? 0;
+      showAskPickerForNode(group, cx, cy);
+    });
+
     markDirty(true);
     return group;
   }
@@ -894,6 +903,282 @@
     markDirty(true);
   }
 
+  // ── Canvas chat (Q&A as mind branches) ───────────────────────────
+  //
+  // Right-click any mind node → persona picker → free-form question
+  // input → reply spawns as a colored child connected by curve.
+  // Reply nodes store hiveQA={question, answer, personaId, personaName, ts}
+  // so the conversation can be re-read and continued. Right-clicking
+  // a reply triggers the same flow, but ancestryQAHistory threads
+  // prior Q&A pairs as conversation history.
+
+  const REPLY_LABEL_MAX = 80;
+
+  function summariseReply(text) {
+    const trimmed = (text || '').trim();
+    if (!trimmed) return '(empty reply)';
+    const m = trimmed.match(/^[\s\S]*?[.!?](?=\s|$)/);
+    let head = m ? m[0] : trimmed.split(/\n/)[0];
+    if (head.length > REPLY_LABEL_MAX) head = head.slice(0, REPLY_LABEL_MAX - 1).trimEnd() + '…';
+    return head;
+  }
+
+  function ancestryQAHistory(node) {
+    // Walk parents oldest-first. Every Q&A ancestor contributes a
+    // user→assistant pair so follow-ups thread coherently.
+    const chain = [];
+    let cur = node;
+    let safety = 64;
+    while (cur && safety-- > 0) {
+      const qa = cur.getAttr?.('hiveQA');
+      if (qa && qa.question && qa.answer) chain.unshift(qa);
+      const pid = cur.getAttr?.('hivePid');
+      if (pid == null) break;
+      cur = findGroupById(pid);
+    }
+    const history = [];
+    for (const qa of chain) {
+      history.push({ role: 'user', content: qa.question });
+      history.push({ role: 'assistant', content: qa.answer });
+    }
+    return history;
+  }
+
+  let askPickerEl = null;
+  let askInputEl = null;
+
+  function closeAskPicker() {
+    if (askPickerEl) { askPickerEl.remove(); askPickerEl = null; }
+    document.removeEventListener('mousedown', onAskPickerOutside, true);
+  }
+  function onAskPickerOutside(e) {
+    if (!askPickerEl) return;
+    if (!askPickerEl.contains(e.target)) closeAskPicker();
+  }
+
+  async function showAskPickerForNode(group, clientX, clientY) {
+    closeAgentPicker();
+    closeAskPicker();
+    closeAskInput();
+    if (!agentCache) {
+      try {
+        const res = await window.hive.listAdvisors();
+        agentCache = res?.advisors ?? res ?? [];
+      } catch { agentCache = []; }
+    }
+    const isFollowUp = !!group.getAttr?.('hiveQA');
+    const header = isFollowUp ? 'Ask follow-up…' : 'Ask…';
+    const el = document.createElement('div');
+    el.className = 'ls-agent-picker';
+    // Place near cursor; clamp to viewport
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const left = Math.min(clientX, vw - 280);
+    const top = Math.min(clientY, vh - 320);
+    el.style.left = left + 'px';
+    el.style.top = top + 'px';
+    el.innerHTML = `
+      <div class="ls-agent-picker-h">${escapeHtml(header)}</div>
+      ${agentCache.map(a => `
+        <button class="ls-agent-picker-row" data-persona="${a.id}">
+          <span class="ls-agent-picker-dot" style="background:${AGENT_COLOR[a.id] || '#8A8F98'};"></span>
+          <span class="ls-agent-picker-name">${escapeHtml(a.name)}</span>
+          <span class="ls-agent-picker-scope">${escapeHtml((a.title || a.scope || '').slice(0, 40))}</span>
+        </button>
+      `).join('')}
+    `;
+    document.body.appendChild(el);
+    askPickerEl = el;
+    el.querySelectorAll('[data-persona]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const pid = btn.dataset.persona;
+        const persona = agentCache.find(a => a.id === pid);
+        closeAskPicker();
+        showAskInputForNode(group, persona, clientX, clientY);
+      });
+    });
+    setTimeout(() => document.addEventListener('mousedown', onAskPickerOutside, true), 0);
+  }
+
+  function closeAskInput() {
+    if (askInputEl) { askInputEl.remove(); askInputEl = null; }
+    document.removeEventListener('mousedown', onAskInputOutside, true);
+  }
+  function onAskInputOutside(e) {
+    if (!askInputEl) return;
+    if (!askInputEl.contains(e.target)) closeAskInput();
+  }
+
+  function showAskInputForNode(group, persona, clientX, clientY) {
+    closeAskInput();
+    const personaName = persona?.name ?? persona?.id ?? 'advisor';
+    const personaId = persona?.id;
+    if (!personaId) return;
+    const color = AGENT_COLOR[personaId] || '#D4A574';
+    const isFollowUp = !!group.getAttr?.('hiveQA');
+    const topicText = (group.findOne('Text')?.text() || '').trim();
+
+    const el = document.createElement('div');
+    el.className = 'ls-ask-input';
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const left = Math.min(clientX, vw - 340);
+    const top = Math.min(clientY, vh - 180);
+    el.style.left = left + 'px';
+    el.style.top = top + 'px';
+    el.innerHTML = `
+      <div class="ls-ask-input-h">
+        <span class="ls-agent-picker-dot" style="background:${color};"></span>
+        <span class="ls-ask-input-persona">${escapeHtml(personaName)}</span>
+        <span class="ls-ask-input-topic">${escapeHtml(isFollowUp ? 'follow-up' : (topicText.slice(0, 32) || 'topic'))}</span>
+      </div>
+      <textarea class="ls-ask-input-ta" placeholder="${isFollowUp ? 'Follow-up question…' : 'Ask anything…'}" rows="3"></textarea>
+      <div class="ls-ask-input-hint">Enter to send · Shift+Enter newline · Esc cancel</div>
+    `;
+    document.body.appendChild(el);
+    askInputEl = el;
+    const ta = el.querySelector('textarea');
+    ta.focus();
+    ta.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); closeAskInput(); return; }
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        const q = ta.value.trim();
+        if (!q) { closeAskInput(); return; }
+        closeAskInput();
+        runAsk(group, personaId, personaName, q, color);
+      }
+    });
+    setTimeout(() => document.addEventListener('mousedown', onAskInputOutside, true), 0);
+  }
+
+  async function runAsk(sourceGroup, personaId, personaName, question, color) {
+    // Spinner on source node — reuse the spark glyph slot
+    const texts = sourceGroup.getChildren(c => c.className === 'Text');
+    const sparkGlyph = texts[2];
+    let prevSpark = null;
+    if (sparkGlyph) {
+      prevSpark = sparkGlyph.text();
+      sparkGlyph.text('⋯');
+      sparkGlyph.opacity(1);
+      layer.batchDraw();
+    }
+    flashCanvasToast(`Asking ${personaName}…`);
+    const history = ancestryQAHistory(sourceGroup);
+    let res;
+    try {
+      res = await window.hive.consultAdvisor(personaId, question, history);
+    } catch (err) {
+      res = { ok: false, error: String(err) };
+    }
+    if (sparkGlyph) {
+      sparkGlyph.text(prevSpark ?? '✨');
+      sparkGlyph.opacity(0);
+      layer.batchDraw();
+    }
+    const reply = res?.reply ?? res?.text ?? '';
+    if (!reply || (typeof res === 'object' && res?.ok === false)) {
+      flashCanvasToast(`No reply — ${res?.error ?? 'empty'}`);
+      return;
+    }
+    spawnReplyNode(sourceGroup, personaId, personaName, question, reply, color);
+  }
+
+  function spawnReplyNode(parentGroup, personaId, personaName, question, answer, color) {
+    const label = summariseReply(answer);
+    const parentRect = parentGroup.findOne('Rect');
+    const newX = parentGroup.x() + parentRect.width() + 100;
+    const replyColor = color || AGENT_COLOR[personaId] || '#D4A574';
+    const group = spawnMindNode(newX, parentGroup.y(), parentGroup, replyColor, label);
+    group.setAttr('hiveQA', {
+      question,
+      answer,
+      personaId,
+      personaName,
+      ts: Date.now(),
+    });
+    // If answer has more than the label captures, add an expand indicator
+    if (answer.trim().length > label.length) {
+      addExpandIndicator(group);
+    }
+    relayoutChildrenOf(parentGroup);
+    markDirty(true);
+    return group;
+  }
+
+  function addExpandIndicator(group) {
+    const rect = group.findOne('Rect');
+    if (!rect) return;
+    const w = rect.width();
+    const h = rect.height();
+    const color = group.getAttr('hiveBranchColor') || '#D4A574';
+    // Small chevron at bottom-right indicating "more"
+    const indicator = new Konva.Text({
+      x: w - 14, y: h - 12,
+      text: '▾',
+      fontSize: 9,
+      fill: color,
+      opacity: 0.65,
+      listening: true,
+    });
+    indicator.setAttr('hiveType', 'qa-expand');
+    indicator.on('click tap', (e) => {
+      e.cancelBubble = true;
+      openReplyPanel(group);
+    });
+    indicator.on('mouseenter', () => { indicator.opacity(1); STAGE_HOST.style.cursor = 'pointer'; layer.batchDraw(); });
+    indicator.on('mouseleave', () => { indicator.opacity(0.65); STAGE_HOST.style.cursor = ''; layer.batchDraw(); });
+    group.add(indicator);
+    layer.batchDraw();
+  }
+
+  let replyPanelEl = null;
+  function closeReplyPanel() {
+    if (replyPanelEl) { replyPanelEl.remove(); replyPanelEl = null; }
+    document.removeEventListener('keydown', onReplyPanelKey, true);
+  }
+  function onReplyPanelKey(e) {
+    if (e.key === 'Escape') closeReplyPanel();
+  }
+
+  function openReplyPanel(group) {
+    closeReplyPanel();
+    const qa = group.getAttr?.('hiveQA');
+    if (!qa) return;
+    const color = AGENT_COLOR[qa.personaId] || '#D4A574';
+    const ts = qa.ts ? new Date(qa.ts).toLocaleString() : '';
+    const el = document.createElement('div');
+    el.className = 'ls-reply-panel';
+    el.innerHTML = `
+      <div class="ls-reply-panel-h">
+        <span class="ls-agent-picker-dot" style="background:${color};"></span>
+        <span class="ls-reply-panel-name">${escapeHtml(qa.personaName || qa.personaId || '')}</span>
+        <span class="ls-reply-panel-ts">${escapeHtml(ts)}</span>
+        <button class="ls-reply-panel-close" type="button">×</button>
+      </div>
+      <div class="ls-reply-panel-q-label">Question</div>
+      <div class="ls-reply-panel-q">${escapeHtml(qa.question)}</div>
+      <div class="ls-reply-panel-a-label">Reply</div>
+      <div class="ls-reply-panel-a">${escapeHtml(qa.answer)}</div>
+      <div class="ls-reply-panel-actions">
+        <button class="ls-reply-panel-followup" type="button">Ask follow-up</button>
+      </div>
+    `;
+    document.body.appendChild(el);
+    replyPanelEl = el;
+    el.querySelector('.ls-reply-panel-close').addEventListener('click', closeReplyPanel);
+    el.querySelector('.ls-reply-panel-followup').addEventListener('click', () => {
+      const rect = group.findOne('Rect').getClientRect({ relativeTo: stage });
+      const hostRect = STAGE_HOST.getBoundingClientRect();
+      const cx = hostRect.left + rect.x + rect.width + 40;
+      const cy = hostRect.top + rect.y;
+      closeReplyPanel();
+      // Skip picker — re-use the same persona
+      const persona = (agentCache || []).find(a => a.id === qa.personaId)
+        ?? { id: qa.personaId, name: qa.personaName };
+      showAskInputForNode(group, persona, cx, cy);
+    });
+    document.addEventListener('keydown', onReplyPanelKey, true);
+  }
+
   function flashCanvasToast(msg) {
     const t = document.createElement('div');
     t.textContent = msg;
@@ -1113,6 +1398,27 @@
       if (plusGlyph) plusGlyph.on('click tap', (e) => { e.cancelBubble = true; addMindChild(n); });
       if (sparkBg) sparkBg.on('click tap', (e) => { e.cancelBubble = true; showAgentPickerForNode(n); });
       if (sparkGlyph) sparkGlyph.on('click tap', (e) => { e.cancelBubble = true; showAgentPickerForNode(n); });
+
+      // Right-click → canvas-chat Ask flow (mirrors spawnMindNode wiring)
+      n.on('contextmenu', (e) => {
+        e.cancelBubble = true;
+        if (e.evt) { e.evt.preventDefault(); }
+        const cx = e.evt?.clientX ?? 0;
+        const cy = e.evt?.clientY ?? 0;
+        showAskPickerForNode(n, cx, cy);
+      });
+
+      // Re-attach the Q&A expand indicator click on reload — it round-trips
+      // via Konva.toJSON (hiveType attr preserved) but event handlers do not.
+      if (n.getAttr?.('hiveQA')) {
+        const extraTexts = n.getChildren(c => c.className === 'Text' && c.getAttr?.('hiveType') === 'qa-expand');
+        for (const ind of extraTexts) {
+          ind.off('click tap mouseenter mouseleave');
+          ind.on('click tap', (e) => { e.cancelBubble = true; openReplyPanel(n); });
+          ind.on('mouseenter', () => { ind.opacity(1); STAGE_HOST.style.cursor = 'pointer'; layer.batchDraw(); });
+          ind.on('mouseleave', () => { ind.opacity(0.65); STAGE_HOST.style.cursor = ''; layer.batchDraw(); });
+        }
+      }
 
       // Hover affordance
       n.on('mouseenter', () => {
