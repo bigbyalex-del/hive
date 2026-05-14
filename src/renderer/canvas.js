@@ -1865,7 +1865,19 @@
   function loadState(stateJson, resetHistory = true) {
     suppressDirty = true;
     if (transformer) transformer.nodes([]);
+    // destroyChildren() kills the singleton transformer along with the
+    // rest — re-adding the destroyed instance leaves Konva firing events
+    // on dead anchors. Recreate it fresh after the wipe.
     layer.destroyChildren();
+    transformer = new Konva.Transformer({
+      rotateEnabled: true,
+      borderStroke: ACCENT,
+      borderStrokeWidth: 1,
+      anchorStroke: ACCENT,
+      anchorFill: '#08090A',
+      anchorSize: 8,
+      anchorCornerRadius: 2,
+    });
     layer.add(transformer);
     if (!stateJson || stateJson === '{}') {
       layer.draw();
