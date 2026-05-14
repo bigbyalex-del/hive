@@ -221,6 +221,15 @@
         } else {
           const shape = e.target;
           if (shape === transformer || shape.getParent() === transformer) return;
+          // Don't attach the resize Transformer to mind-node groups — they
+          // auto-size from their text label and dragging a corner handle
+          // scales the whole group (including ✨/+ glyphs) into a mess.
+          let mindAncestor = shape;
+          while (mindAncestor && !isMindNode(mindAncestor)) mindAncestor = mindAncestor.getParent?.();
+          if (isMindNode(mindAncestor)) {
+            transformer.nodes([]);
+            return;
+          }
           transformer.nodes([shape]);
         }
       }
@@ -1351,6 +1360,11 @@
 
     layer.getChildren().forEach(n => {
       if (!isMindNode(n)) return;
+      // Reset any accidental scale from when the Transformer used to grab
+      // mind-node groups — auto-sizing assumes scale 1×1.
+      if (n.scaleX() !== 1 || n.scaleY() !== 1) {
+        n.scale({ x: 1, y: 1 });
+      }
       const text = n.findOne('Text');
       const rect = n.findOne('Rect');
       // Canvas may have been saved before ✨ was added → pad missing
