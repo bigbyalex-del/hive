@@ -172,6 +172,9 @@
 
       if (currentTool === 'mind') {
         spawnMindNode(pointer.x, pointer.y, null, null);
+        // One-shot: drop one root, then return to select so the next
+        // click doesn't spawn another root by accident.
+        setTool('select');
         return;
       }
 
