@@ -3184,6 +3184,69 @@ body.mode-linear.canvas-active .ls-detail { display: none; }
 .ls-chat-send:hover { filter: brightness(1.1); }
 .ls-chat-send:disabled { opacity: 0.5; cursor: default; }
 
+.ls-chat-council {
+  background: var(--ls-surface, #101113);
+  border: 1px solid var(--ls-border, #1F2023);
+  color: var(--ls-text-dim, #8A8F98);
+  height: 38px;
+  padding: 0 12px;
+  border-radius: 5px;
+  font-size: 11px;
+  cursor: pointer;
+  font-family: inherit;
+  flex-shrink: 0;
+}
+.ls-chat-council:hover:not(:disabled) {
+  background: var(--ls-surface-hov, #1A1B1F);
+  color: var(--ls-text, #F7F8F8);
+}
+.ls-chat-council:disabled { opacity: 0.5; cursor: default; }
+
+/* @-mention autocomplete picker */
+.ls-chat-mention-picker {
+  position: fixed;
+  background: var(--ls-surface, #101113);
+  border: 1px solid var(--ls-border, #1F2023);
+  border-radius: 6px;
+  padding: 4px;
+  min-width: 240px;
+  max-height: 280px;
+  overflow-y: auto;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+  z-index: 250;
+  font-family: 'Inter', system-ui, sans-serif;
+}
+.ls-chat-mention-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 9px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--ls-text-dim, #8A8F98);
+}
+.ls-chat-mention-row:hover,
+.ls-chat-mention-row.active {
+  background: var(--ls-surface-hov, #1A1B1F);
+  color: var(--ls-text, #F7F8F8);
+}
+.ls-chat-mention-name { font-weight: 500; }
+.ls-chat-mention-id {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--ls-text-faint, #5D6068);
+  font-family: 'JetBrains Mono', Consolas, monospace;
+}
+
+/* Pending placeholder bubble (waiting for assistant reply) */
+.ls-chat-bubble.pending {
+  font-style: italic;
+  color: var(--ls-text-faint, #5D6068);
+  background: var(--ls-bg, #08090A);
+  border-style: dashed;
+}
+
 /* Global Chat FAB — always-visible toggle to open chat from any view */
 .ls-chat-fab {
   position: fixed;
