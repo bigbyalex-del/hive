@@ -945,6 +945,39 @@ app.whenReady().then(async () => {
     }
   });
 
+  ipcMain.handle(IPC.ReadGeneratedImage, async (_e, absPath: string) => {
+    try {
+      const path = await import('path');
+      const fs = await import('fs/promises');
+      const os = await import('os');
+      const GENERATED_ROOT = path.join(os.homedir(), '.hive', 'generated-images');
+      const norm = path.resolve(absPath);
+      if (!norm.startsWith(GENERATED_ROOT + path.sep) && norm !== GENERATED_ROOT) {
+        return { ok: false, error: 'path is outside ~/.hive/generated-images/' };
+      }
+      const buf = await fs.readFile(norm);
+      const dataUrl = 'data:image/png;base64,' + buf.toString('base64');
+      return { ok: true, dataUrl };
+    } catch (err: any) {
+      return { ok: false, error: err?.message ?? String(err) };
+    }
+  });
+
+  ipcMain.handle(IPC.OpenGeneratedImagesFolder, async () => {
+    try {
+      const path = await import('path');
+      const os = await import('os');
+      const fs = await import('fs/promises');
+      const { shell } = await import('electron');
+      const dir = path.join(os.homedir(), '.hive', 'generated-images');
+      await fs.mkdir(dir, { recursive: true });
+      shell.openPath(dir);
+      return { ok: true, path: dir };
+    } catch (err: any) {
+      return { ok: false, error: err?.message ?? String(err) };
+    }
+  });
+
   // ---- Pulse + chats ------------------------------------------------
   ipcMain.handle(IPC.GetPulse, () => {
     try { return { ok: true, pulse: pulseGet() }; }

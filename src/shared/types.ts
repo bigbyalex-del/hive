@@ -127,6 +127,8 @@ export const IPC = {
   ChatWithAdvisor: 'hive:chat-with-advisor',
   ListChatModels: 'hive:list-chat-models',
   DeployCommitRange: 'hive:deploy-commit-range',
+  ReadGeneratedImage: 'hive:read-generated-image',
+  OpenGeneratedImagesFolder: 'hive:open-generated-images-folder',
 } as const;
 
 export type AgentEvent =

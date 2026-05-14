@@ -101,6 +101,8 @@ const IPC = {
   ChatWithAdvisor: 'hive:chat-with-advisor',
   ListChatModels: 'hive:list-chat-models',
   DeployCommitRange: 'hive:deploy-commit-range',
+  ReadGeneratedImage: 'hive:read-generated-image',
+  OpenGeneratedImagesFolder: 'hive:open-generated-images-folder',
 };
 
 contextBridge.exposeInMainWorld('hive', {
@@ -174,6 +176,8 @@ contextBridge.exposeInMainWorld('hive', {
     ipcRenderer.invoke(IPC.ChatWithAdvisor, req),
   listChatModels: () => ipcRenderer.invoke(IPC.ListChatModels),
   deployCommitRange: (deployId: number) => ipcRenderer.invoke(IPC.DeployCommitRange, deployId),
+  readGeneratedImage: (absPath: string) => ipcRenderer.invoke(IPC.ReadGeneratedImage, absPath),
+  openGeneratedImagesFolder: () => ipcRenderer.invoke(IPC.OpenGeneratedImagesFolder),
   refreshSeeds: () => ipcRenderer.invoke(IPC.RefreshSeeds),
   onRefreshSeedsLog: (cb: (line: string) => void) => {
     const listener = (_: Electron.IpcRendererEvent, line: string) => cb(line);

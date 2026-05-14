@@ -12,10 +12,14 @@
 
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import * as os from 'os';
 import { ToolDef, ProviderName, RunOptions } from './providers/types';
 import { getProvider, listProviders } from './providers/registry';
 import { loadPersonas } from './advisors';
 import { listActions } from './db';
+
+const dynamicImport = new Function('m', 'return import(m)') as (m: string) => Promise<any>;
+const GENERATED_IMAGES_DIR = path.join(os.homedir(), '.hive', 'generated-images');
 
 const FXV_ROOT = 'C:\\Users\\Fusion\\.openclaw\\workspace\\fxv-performance';
 const FXV_ALLOWED_SUBDIRS = ['mobile', 'supabase', 'site', 'docs'];
@@ -144,6 +148,48 @@ function chatTools(): ToolDef[] {
         } finally {
           clearTimeout(timeout);
         }
+      },
+    },
+    {
+      name: 'generate_image',
+      description: 'Generate an image with OpenAI gpt-image-1 (DALL-E successor) and save it to ~/.hive/generated-images/. Returns the absolute file path. Use for promotional artwork, mockups, hero images, etc. Each image costs ~£0.04 (1024x1024 standard). Always ask the user first if they want you to generate — don\'t use it speculatively.',
+      schema: {
+        type: 'object',
+        properties: {
+          prompt: { type: 'string', description: 'detailed description of the image to generate (be specific about style, composition, colours, mood)' },
+          size: { type: 'string', enum: ['1024x1024', '1536x1024', '1024x1536'], description: 'output size. 1024x1024=square, 1536x1024=landscape, 1024x1536=portrait. Default 1024x1024.' },
+          quality: { type: 'string', enum: ['standard', 'high'], description: 'standard ~£0.04, high ~£0.17. Default standard.' },
+          filename: { type: 'string', description: 'optional descriptive filename (no extension, no slashes). Defaults to a timestamp.' },
+        },
+        required: ['prompt'],
+      },
+      run: async ({ prompt, size, quality, filename }) => {
+        if (!process.env.OPENAI_API_KEY) {
+          throw new Error('OPENAI_API_KEY missing in .env — needed for image generation');
+        }
+        if (typeof prompt !== 'string' || !prompt.trim()) throw new Error('prompt required');
+        const mod = await dynamicImport('openai');
+        const Ctor = mod.default ?? mod.OpenAI;
+        const client = new Ctor({ apiKey: process.env.OPENAI_API_KEY });
+        const requestSize = ['1024x1024', '1536x1024', '1024x1536'].includes(size) ? size : '1024x1024';
+        const requestQuality = quality === 'high' ? 'high' : 'standard';
+        const resp = await client.images.generate({
+          model: 'gpt-image-1',
+          prompt: prompt.slice(0, 4000),
+          size: requestSize,
+          quality: requestQuality,
+          n: 1,
+        });
+        const b64 = resp?.data?.[0]?.b64_json;
+        if (!b64) throw new Error('no image returned by API');
+        await fs.mkdir(GENERATED_IMAGES_DIR, { recursive: true });
+        const safeName = (typeof filename === 'string' && filename.trim())
+          ? filename.replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 80)
+          : `img-${Date.now()}`;
+        const filePath = path.join(GENERATED_IMAGES_DIR, `${safeName}.png`);
+        await fs.writeFile(filePath, Buffer.from(b64, 'base64'));
+        const sizeBytes = Buffer.byteLength(b64, 'base64');
+        return `Saved: ${filePath}\nSize: ${requestSize} ${requestQuality}\nFile size: ${(sizeBytes / 1024).toFixed(0)} KB\n\nThe user can open this folder via Explorer to review. They'll need to copy/upload to wherever they want to use it.`;
       },
     },
     {
