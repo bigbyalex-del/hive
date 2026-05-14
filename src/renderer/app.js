@@ -4272,19 +4272,18 @@ window.__extractActionsFor = async (personaId, question, reply) => {
       closeCanvasIfOpen();
       if (v === 'chat') {
         setActiveNav('chat');
+        window.__lsDeploys?.close?.();
         window.__lsChat?.open?.();
         return;
       }
       window.__lsChat?.close?.();
-      if (v === 'actions') { filter.status = 'active'; setActiveNav('actions'); refreshActions(); renderFilterChips(); return; }
       if (v === 'deploys') {
         setActiveNav('deploys');
-        document.getElementById('open-deploy')?.click();
-        // Land on the history list (what shipped + when) instead of the
-        // initiate-deploy form, since this is browsing not deploying.
-        setTimeout(() => document.getElementById('deploy-history-link')?.click(), 50);
+        window.__lsDeploys?.open?.();
         return;
       }
+      window.__lsDeploys?.close?.();
+      if (v === 'actions') { filter.status = 'active'; setActiveNav('actions'); refreshActions(); renderFilterChips(); return; }
       // Specialists → native Linear list view (no modal, no shell swap).
       if (v === 'specialists') {
         setActiveNav(v);

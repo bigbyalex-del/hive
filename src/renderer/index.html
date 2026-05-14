@@ -725,6 +725,25 @@
   </div>
 
   <!-- ═══════════════════════════════════════════════════════════════
+       DEPLOYS VIEW (v3.0-δ)
+       Native Linear panel listing deploy history with per-row
+       commit-range expander. "+ New deploy" button still hooks the
+       legacy modal for actual deploy actions.
+  ═══════════════════════════════════════════════════════════════ -->
+  <div class="ls-deploys-shell" id="ls-deploys-shell" style="display:none;">
+    <div class="ls-deploys-header">
+      <div class="ls-deploys-title">Deploys</div>
+      <div class="ls-deploys-sub" id="ls-deploys-sub">FXV — TestFlight + EAS update history</div>
+      <div class="ls-chat-spacer"></div>
+      <button class="ls-deploys-refresh" id="ls-deploys-refresh" title="Refresh">↻</button>
+      <button class="ls-deploys-new" id="ls-deploys-new" title="Initiate a new deploy (opens deploy form)">+ New deploy</button>
+    </div>
+    <div class="ls-deploys-list" id="ls-deploys-list">
+      <div class="ls-deploys-empty">Loading…</div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════
        CHAT VIEW (v3.0-δ)
        Live conversational chat with any persona. Provider + model
        picked per message. Tool-using (read FXV repo, fetch web,
@@ -776,5 +795,6 @@
   <script src="app.js"></script>
   <script src="canvas.js"></script>
   <script src="chat.js"></script>
+  <script src="deploys.js"></script>
 </body>
 </html>

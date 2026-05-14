@@ -3180,3 +3180,170 @@ body.mode-linear.canvas-active .ls-detail { display: none; }
 .ls-chat-send:hover { filter: brightness(1.1); }
 .ls-chat-send:disabled { opacity: 0.5; cursor: default; }
 
+/* ════════════════════════════════════════════════════════════════════
+   DEPLOYS VIEW (v3.0-δ)
+   ════════════════════════════════════════════════════════════════════ */
+
+.ls-deploys-shell {
+  position: fixed;
+  inset: 44px 0 0 220px;
+  background: var(--ls-bg);
+  display: flex;
+  flex-direction: column;
+  z-index: 13;
+  font-family: 'Inter', system-ui, sans-serif;
+  color: var(--ls-text);
+}
+.ls-deploys-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 24px 12px;
+  border-bottom: 1px solid var(--ls-border);
+}
+.ls-deploys-title {
+  font-size: 18px;
+  font-weight: 600;
+}
+.ls-deploys-sub {
+  font-size: 11px;
+  color: var(--ls-text-faint);
+}
+.ls-deploys-refresh,
+.ls-deploys-new {
+  background: var(--ls-surface);
+  border: 1px solid var(--ls-border);
+  color: var(--ls-text-dim);
+  font-family: inherit;
+  font-size: 12px;
+  padding: 6px 12px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.ls-deploys-refresh {
+  padding: 6px 10px;
+  font-size: 14px;
+}
+.ls-deploys-refresh:hover,
+.ls-deploys-new:hover {
+  background: var(--ls-surface-hov);
+  color: var(--ls-text);
+}
+.ls-deploys-new {
+  background: var(--ls-accent, #c084fc);
+  color: #08090A;
+  border: 0;
+  font-weight: 600;
+}
+.ls-deploys-new:hover { filter: brightness(1.1); color: #08090A; }
+.ls-deploys-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 24px 60px;
+}
+.ls-deploys-empty {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--ls-text-faint);
+}
+.ls-deploys-empty.error { color: #E07B5F; }
+.ls-deploys-empty-title {
+  font-size: 14px;
+  color: var(--ls-text-dim);
+  margin-bottom: 6px;
+}
+.ls-deploys-empty-sub {
+  font-size: 12px;
+}
+.ls-deploy-row {
+  border-bottom: 1px solid var(--ls-border-soft);
+  padding: 12px 4px;
+}
+.ls-deploy-row:last-child { border-bottom: 0; }
+.ls-deploy-row-h {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.ls-deploy-row-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  flex-shrink: 0;
+}
+.ls-deploy-row-status {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ls-text-faint);
+  min-width: 80px;
+}
+.ls-deploy-row-msg {
+  flex: 1;
+  font-size: 13px;
+  color: var(--ls-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ls-deploy-row-time {
+  font-size: 11px;
+  color: var(--ls-text-faint);
+  flex-shrink: 0;
+}
+.ls-deploy-row-meta {
+  margin: 4px 0 0 18px;
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-size: 10px;
+  color: var(--ls-text-faint);
+}
+.ls-deploy-row-commits-btn {
+  margin: 8px 0 0 18px;
+  background: transparent;
+  border: 1px solid var(--ls-border);
+  color: var(--ls-text-faint);
+  font-family: inherit;
+  font-size: 10px;
+  padding: 3px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.ls-deploy-row-commits-btn:hover {
+  background: var(--ls-surface-hov);
+  color: var(--ls-text);
+}
+.ls-deploy-row-commits {
+  margin: 8px 0 0 18px;
+  padding: 8px 10px;
+  background: var(--ls-surface);
+  border: 1px solid var(--ls-border);
+  border-radius: 5px;
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-size: 11px;
+}
+.ls-deploy-commit {
+  display: flex;
+  gap: 10px;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--ls-border-soft);
+  align-items: baseline;
+}
+.ls-deploy-commit:last-child { border-bottom: 0; }
+.ls-deploy-commit-sha { color: var(--ls-text-faint); flex-shrink: 0; }
+.ls-deploy-commit-subject { color: var(--ls-text); flex: 1; }
+.ls-deploy-commit-meta { color: var(--ls-text-faint); font-size: 10px; flex-shrink: 0; }
+.ls-deploy-commit-empty,
+.ls-deploy-commit-err {
+  color: var(--ls-text-faint);
+  font-style: italic;
+}
+.ls-deploy-commit-err { color: #E07B5F; }
+.ls-deploy-row-error {
+  margin: 8px 0 0 18px;
+  padding: 8px 10px;
+  background: rgba(224, 123, 95, 0.08);
+  border: 1px solid rgba(224, 123, 95, 0.25);
+  border-radius: 5px;
+  font-size: 11px;
+  color: #E07B5F;
+  white-space: pre-wrap;
+}
+
