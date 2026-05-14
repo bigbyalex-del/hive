@@ -17,6 +17,7 @@ import { costGBP } from './pricing';
 import { diffWorkerBranch } from './projectRepo';
 import { babysitStart, babysitStop, babysitStatus } from './babysit';
 import { listAdvisors, consultAdvisor, extractActions, runCouncil, runShipAudit, expandMindTopic, auditActions } from './advisors';
+import { chatWithAdvisor, listChatModels } from './chat';
 import { runSeed } from '../scripts/seed-fxv-personas';
 import { startAlertsPolling, stopAlertsPolling, pollAllOnce, alertsConfig } from './alerts';
 import { listAlerts as dbListAlerts, setAlertStatus, deleteAlertRow, reconcileStuckDeploys } from './db';
@@ -529,6 +530,22 @@ app.whenReady().then(async () => {
         { useFullCodebase: !!payload.useFullCodebase },
       );
       return { ok: true, ...result };
+    } catch (err: any) {
+      return { ok: false, error: err?.message ?? String(err) };
+    }
+  });
+
+  ipcMain.handle(IPC.ChatWithAdvisor, async (_e, payload: any) => {
+    try {
+      const result = await chatWithAdvisor(payload);
+      return { ok: true, ...result };
+    } catch (err: any) {
+      return { ok: false, error: err?.message ?? String(err) };
+    }
+  });
+  ipcMain.handle(IPC.ListChatModels, () => {
+    try {
+      return { ok: true, ...listChatModels() };
     } catch (err: any) {
       return { ok: false, error: err?.message ?? String(err) };
     }

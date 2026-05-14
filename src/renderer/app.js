@@ -4213,7 +4213,7 @@ window.__extractActionsFor = async (personaId, question, reply) => {
       actions: 'Actions', inbox: 'Inbox', backlog: 'Backlog',
       specialists: 'Specialists', pulse: 'Pulse', drafts: 'Drafts',
       deploys: 'Deploys', alerts: 'Alerts', council: 'Council',
-      'ship-audit': 'Ship audit', canvas: 'Canvas',
+      'ship-audit': 'Ship audit', canvas: 'Canvas', chat: 'Chat',
     })[view] || view;
   }
 
@@ -4229,6 +4229,12 @@ window.__extractActionsFor = async (personaId, question, reply) => {
       const v = el.dataset.view;
       if (v === 'canvas') { setActiveNav('canvas'); return; }
       closeCanvasIfOpen();
+      if (v === 'chat') {
+        setActiveNav('chat');
+        window.__lsChat?.open?.();
+        return;
+      }
+      window.__lsChat?.close?.();
       if (v === 'actions') { filter.status = 'active'; setActiveNav('actions'); refreshActions(); renderFilterChips(); return; }
       if (v === 'deploys') { setActiveNav('deploys'); document.getElementById('open-deploy')?.click(); return; }
       // Specialists → native Linear list view (no modal, no shell swap).

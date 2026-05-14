@@ -98,6 +98,8 @@ const IPC = {
   AuditActions: 'hive:audit-actions',
   CodebaseSnapshotStats: 'hive:codebase-snapshot-stats',
   CodebaseSnapshotRefresh: 'hive:codebase-snapshot-refresh',
+  ChatWithAdvisor: 'hive:chat-with-advisor',
+  ListChatModels: 'hive:list-chat-models',
 };
 
 contextBridge.exposeInMainWorld('hive', {
@@ -167,6 +169,9 @@ contextBridge.exposeInMainWorld('hive', {
     ipcRenderer.invoke(IPC.ConsultAdvisor, { personaId, question, history: history ?? [], useFullCodebase: !!opts?.useFullCodebase }),
   codebaseSnapshotStats: () => ipcRenderer.invoke(IPC.CodebaseSnapshotStats),
   codebaseSnapshotRefresh: () => ipcRenderer.invoke(IPC.CodebaseSnapshotRefresh),
+  chatWithAdvisor: (req: { personaId: string; question: string; history?: { role: 'user' | 'assistant'; content: string }[]; providerName?: string; model?: string; enableTools?: boolean }) =>
+    ipcRenderer.invoke(IPC.ChatWithAdvisor, req),
+  listChatModels: () => ipcRenderer.invoke(IPC.ListChatModels),
   refreshSeeds: () => ipcRenderer.invoke(IPC.RefreshSeeds),
   onRefreshSeedsLog: (cb: (line: string) => void) => {
     const listener = (_: Electron.IpcRendererEvent, line: string) => cb(line);

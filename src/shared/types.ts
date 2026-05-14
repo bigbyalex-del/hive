@@ -124,6 +124,8 @@ export const IPC = {
   AuditActions: 'hive:audit-actions',
   CodebaseSnapshotStats: 'hive:codebase-snapshot-stats',
   CodebaseSnapshotRefresh: 'hive:codebase-snapshot-refresh',
+  ChatWithAdvisor: 'hive:chat-with-advisor',
+  ListChatModels: 'hive:list-chat-models',
 } as const;
 
 export type AgentEvent =

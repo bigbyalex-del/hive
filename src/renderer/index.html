@@ -494,6 +494,10 @@
           <svg class="ls-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
           <span>Canvas</span>
         </div>
+        <div class="ls-nav-item" data-view="chat" title="Live chat with Programme Lead (or any persona). Tool-using, multi-provider.">
+          <svg class="ls-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+          <span>Chat</span>
+        </div>
         <div class="ls-nav-item" data-view="specialists" title="Chat with FXV domain specialists">
           <svg class="ls-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
           <span>Specialists</span>
@@ -720,8 +724,57 @@
     </div>
   </div>
 
+  <!-- ═══════════════════════════════════════════════════════════════
+       CHAT VIEW (v3.0-δ)
+       Live conversational chat with any persona. Provider + model
+       picked per message. Tool-using (read FXV repo, fetch web,
+       list actions). Voice in (mic) + voice out (TTS).
+  ═══════════════════════════════════════════════════════════════ -->
+  <div class="ls-chat-shell" id="ls-chat-shell" style="display:none;">
+    <div class="ls-chat-rail">
+      <div class="ls-chat-rail-h">Persona</div>
+      <div class="ls-chat-persona-list" id="ls-chat-persona-list"></div>
+      <div class="ls-chat-rail-h">Conversation</div>
+      <button class="ls-chat-new" id="ls-chat-new">+ New conversation</button>
+    </div>
+    <div class="ls-chat-main">
+      <div class="ls-chat-header">
+        <div class="ls-chat-persona-active" id="ls-chat-persona-active">
+          <span class="ls-chat-persona-dot" id="ls-chat-persona-dot"></span>
+          <span class="ls-chat-persona-name" id="ls-chat-persona-name">Programme Lead</span>
+          <span class="ls-chat-persona-title" id="ls-chat-persona-title"></span>
+        </div>
+        <div class="ls-chat-spacer"></div>
+        <label class="ls-chat-tools-toggle" title="When enabled, the persona can read FXV files, fetch the web, and list Hive Actions to ground its answer. Adds 1–2s and ~£0.001 per tool call.">
+          <input type="checkbox" id="ls-chat-tools" checked />
+          <span>Tools</span>
+        </label>
+      </div>
+      <div class="ls-chat-history" id="ls-chat-history">
+        <div class="ls-chat-empty">
+          <div class="ls-chat-empty-title">Talk to Programme Lead</div>
+          <div class="ls-chat-empty-sub">Pick a persona on the left. Choose provider/model under the input. Tools let it read the FXV repo, fetch web pages, list Hive actions.</div>
+        </div>
+      </div>
+      <div class="ls-chat-input-row">
+        <div class="ls-chat-input-controls">
+          <select class="ls-chat-provider" id="ls-chat-provider" title="Provider"></select>
+          <select class="ls-chat-model" id="ls-chat-model" title="Model"></select>
+        </div>
+        <div class="ls-chat-input-bar">
+          <button class="ls-chat-mic" id="ls-chat-mic" title="Voice input — click to start/stop dictation">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+          </button>
+          <textarea class="ls-chat-input" id="ls-chat-input" rows="1" placeholder="Ask Programme Lead anything…"></textarea>
+          <button class="ls-chat-send" id="ls-chat-send" title="Send (Enter)">Send</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script src="vendor/konva.min.js"></script>
   <script src="app.js"></script>
   <script src="canvas.js"></script>
+  <script src="chat.js"></script>
 </body>
 </html>
