@@ -1796,8 +1796,16 @@
   // and rehydrate images from their dataUrl.
   function snapshot() {
     if (!stage) return null;
+    const stageObj = JSON.parse(stage.toJSON());
+    // Strip Transformer overlays so they don't accumulate across save/load
+    // cycles. (Defense in depth — loadState also skips them on the way in.)
+    for (const layerJson of (stageObj.children || [])) {
+      if (Array.isArray(layerJson.children)) {
+        layerJson.children = layerJson.children.filter(c => c?.className !== 'Transformer');
+      }
+    }
     return JSON.stringify({
-      stage: JSON.parse(stage.toJSON()),
+      stage: stageObj,
       camera: { x: stage.x(), y: stage.y(), scale: stage.scaleX() },
       bg: currentBg,
     });
@@ -1883,6 +1891,11 @@
     const stageLayers = (stageJson?.children) || [];
     for (const layerJson of stageLayers) {
       for (const child of (layerJson.children || [])) {
+        // Skip Transformer overlays from saved JSON — we already have the
+        // singleton on the layer. Persisting them was an oversight; without
+        // this filter, each save-load cycle adds another Transformer and
+        // their cache-clear cascades break with "setAttrs on undefined".
+        if (child?.className === 'Transformer') continue;
         const node = Konva.Node.create(JSON.stringify(child));
         if (!node) continue;
         if (node.className === 'Image' && child.attrs?.dataUrl) {
