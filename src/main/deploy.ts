@@ -616,6 +616,49 @@ export function deployHistory(limit = 20): DeployRow[] {
   return listDeploys(limit);
 }
 
+// Return the commits between this deploy and the previous shipped one on the
+// same channel. Lets the Deploys list show "what was in" each shipment.
+// Falls back to the commit at sha alone if no prior SHA exists.
+export async function deployCommitRange(deployId: number, fxvRoot: string): Promise<{ ok: boolean; commits?: { sha: string; subject: string; author: string; ts: number }[]; error?: string }> {
+  const { spawn } = await import('child_process');
+  const path = await import('path');
+  const fs = await import('fs/promises');
+  const all = listDeploys(200);
+  const d = all.find(x => x.id === deployId);
+  if (!d) return { ok: false, error: 'deploy not found' };
+  if (!d.sha) return { ok: false, error: 'this deploy has no SHA recorded' };
+  // Find the previous shipped deploy on the same (project, channel) with a SHA
+  const prev = all.find(x =>
+    x.project === d.project &&
+    x.channel === d.channel &&
+    x.status === 'shipped' &&
+    x.ts < d.ts &&
+    !!x.sha
+  );
+  const range = prev?.sha ? `${prev.sha}..${d.sha}` : `${d.sha}~1..${d.sha}`;
+  try { await fs.access(path.join(fxvRoot, '.git')); }
+  catch { return { ok: false, error: `not a git repo: ${fxvRoot}` }; }
+  return await new Promise((resolve) => {
+    const args = ['log', '--pretty=format:%H%x09%ct%x09%an%x09%s', range];
+    const child = spawn('git', args, { cwd: fxvRoot, shell: process.platform === 'win32', windowsHide: true });
+    let out = '';
+    let err = '';
+    const timer = setTimeout(() => { try { child.kill(); } catch {}; resolve({ ok: false, error: 'git log timed out' }); }, 10_000);
+    child.stdout.on('data', b => { out += b.toString(); });
+    child.stderr.on('data', b => { err += b.toString(); });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      if (code !== 0) return resolve({ ok: false, error: err.trim() || `git exit ${code}` });
+      const commits = out.split('\n').filter(Boolean).map(line => {
+        const [sha, cts, author, ...subjectParts] = line.split('\t');
+        return { sha, ts: Number(cts) * 1000, author, subject: subjectParts.join('\t') };
+      });
+      resolve({ ok: true, commits });
+    });
+    child.on('error', e => { clearTimeout(timer); resolve({ ok: false, error: e.message }); });
+  });
+}
+
 export function getCachedPlan(planId: string): DeployPlan | null {
   purgeExpired();
   return planCache.get(planId) ?? null;

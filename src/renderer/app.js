@@ -2724,18 +2724,59 @@ deployHistoryLink.addEventListener('click', async (e) => {
       const dur = d.durationMs ? `${(d.durationMs / 1000).toFixed(1)}s` : '?';
       const groupShort = d.groupId ? d.groupId.slice(0, 12) : '—';
       const errSnippet = d.error ? `<div style="color:var(--error);font-size:10px;margin-top:3px;">${escapeHtml(d.error.slice(0, 200))}</div>` : '';
+      const canShowCommits = d.status === 'shipped' && !!d.sha;
       return `
-        <div class="deploy-history-row ${d.status}">
+        <div class="deploy-history-row ${d.status}" data-deploy-id="${d.id}">
           <div class="row-head">
             <span>${escapeHtml(d.kind.toUpperCase())} · ${escapeHtml(d.channel.toUpperCase())} · ${escapeHtml(d.status.toUpperCase())}</span>
             <span>${tsStr}</span>
           </div>
           <div class="row-msg">${escapeHtml(d.message)}</div>
           <div class="row-meta">group ${groupShort} · ${d.sha ? d.sha.slice(0, 8) : 'no-sha'} · ${dur}</div>
+          ${canShowCommits ? `<button class="deploy-row-commits-btn" data-show-commits="${d.id}" style="margin-top:6px;background:transparent;border:1px solid var(--border);color:var(--muted);font-size:10px;padding:3px 8px;border-radius:3px;cursor:pointer;">Show commits</button>` : ''}
+          <div class="deploy-row-commits" data-commits-for="${d.id}" style="display:none;margin-top:8px;font-family:'JetBrains Mono',Consolas,monospace;font-size:10px;line-height:1.5;"></div>
           ${errSnippet}
         </div>
       `;
     }).join('');
+    deployHistoryList.querySelectorAll('[data-show-commits]').forEach(btn => {
+      btn.addEventListener('click', async (ev) => {
+        ev.stopPropagation();
+        const id = Number(btn.dataset.showCommits);
+        const block = deployHistoryList.querySelector(`[data-commits-for="${id}"]`);
+        if (!block) return;
+        if (block.style.display !== 'none' && block.dataset.loaded === '1') {
+          block.style.display = 'none';
+          btn.textContent = 'Show commits';
+          return;
+        }
+        block.style.display = '';
+        btn.textContent = 'Hide commits';
+        if (block.dataset.loaded === '1') return;
+        block.innerHTML = '<span style="color:var(--muted);">loading commits…</span>';
+        try {
+          const cr = await window.hive.deployCommitRange(id);
+          if (!cr?.ok) {
+            block.innerHTML = `<span style="color:var(--error);">${escapeHtml(cr?.error || 'failed')}</span>`;
+            return;
+          }
+          const commits = cr.commits || [];
+          if (!commits.length) {
+            block.innerHTML = '<span style="color:var(--muted);">No new commits since previous deploy on this channel.</span>';
+            block.dataset.loaded = '1';
+            return;
+          }
+          block.innerHTML = commits.map(c => {
+            const cts = new Date(c.ts);
+            const cstr = `${String(cts.getMonth() + 1).padStart(2, '0')}/${String(cts.getDate()).padStart(2, '0')} ${String(cts.getHours()).padStart(2, '0')}:${String(cts.getMinutes()).padStart(2, '0')}`;
+            return `<div><span style="color:var(--muted);">${cstr}</span> <span style="color:var(--text-dim);">${escapeHtml(c.sha.slice(0, 7))}</span> ${escapeHtml(c.subject)} <span style="color:var(--muted);">— ${escapeHtml(c.author)}</span></div>`;
+          }).join('');
+          block.dataset.loaded = '1';
+        } catch (err) {
+          block.innerHTML = `<span style="color:var(--error);">${escapeHtml(err.message || String(err))}</span>`;
+        }
+      });
+    });
   } catch (err) {
     deployHistoryList.innerHTML = `<div style="color:var(--error);font-size:11px;">${escapeHtml(err.message || String(err))}</div>`;
   }
@@ -4236,7 +4277,14 @@ window.__extractActionsFor = async (personaId, question, reply) => {
       }
       window.__lsChat?.close?.();
       if (v === 'actions') { filter.status = 'active'; setActiveNav('actions'); refreshActions(); renderFilterChips(); return; }
-      if (v === 'deploys') { setActiveNav('deploys'); document.getElementById('open-deploy')?.click(); return; }
+      if (v === 'deploys') {
+        setActiveNav('deploys');
+        document.getElementById('open-deploy')?.click();
+        // Land on the history list (what shipped + when) instead of the
+        // initiate-deploy form, since this is browsing not deploying.
+        setTimeout(() => document.getElementById('deploy-history-link')?.click(), 50);
+        return;
+      }
       // Specialists → native Linear list view (no modal, no shell swap).
       if (v === 'specialists') {
         setActiveNav(v);

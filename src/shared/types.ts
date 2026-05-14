@@ -126,6 +126,7 @@ export const IPC = {
   CodebaseSnapshotRefresh: 'hive:codebase-snapshot-refresh',
   ChatWithAdvisor: 'hive:chat-with-advisor',
   ListChatModels: 'hive:list-chat-models',
+  DeployCommitRange: 'hive:deploy-commit-range',
 } as const;
 
 export type AgentEvent =
