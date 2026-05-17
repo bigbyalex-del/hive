@@ -54,6 +54,10 @@
   let mediaRecorder = null;
   let recordedChunks = [];
   let recording = false;
+  // Queued image attachments (data URLs) — flushed into the next send().
+  // Populated by paste on INPUT or by drag-drop. Rendered as a thumbnail
+  // strip above the input.
+  let pendingImages = [];
 
   async function loadAdvisors() {
     try {
@@ -177,14 +181,220 @@
         if (block) block.style.display = block.style.display === 'none' ? '' : 'none';
       });
     });
+    // Async-load any generate_image PNGs referenced by Saved: paths in tool results
+    HISTORY.querySelectorAll('img.ls-chat-genimg[data-path]:not([data-loaded])').forEach(async (img) => {
+      const p = img.dataset.path;
+      img.dataset.loaded = '1';
+      try {
+        const res = await window.hive.readGeneratedImage(p);
+        if (res?.ok && res.dataUrl) {
+          img.src = res.dataUrl;
+        } else {
+          img.replaceWith(Object.assign(document.createElement('div'), {
+            className: 'ls-chat-genimg-err',
+            textContent: `Image unavailable: ${res?.error ?? 'unknown error'}`,
+          }));
+        }
+      } catch (err) {
+        console.error('[chat] readGeneratedImage failed', err);
+      }
+    });
+    // Click on a generated image opens a fullscreen viewer with copy/share buttons
+    HISTORY.querySelectorAll('img.ls-chat-genimg').forEach(img => {
+      img.addEventListener('click', () => openGeneratedImageViewer(img.dataset.path, img.src));
+    });
+    // Mockup-schema buttons open the schema in the mockup tool
+    HISTORY.querySelectorAll('button.ls-chat-mockup-open[data-mockup-schema]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        try {
+          const schema = JSON.parse(btn.dataset.mockupSchema);
+          if (window.__lsMockup?.openWithSchema) {
+            window.__lsMockup.openWithSchema(schema);
+          } else {
+            flashChatToast('Mockup tool not loaded');
+          }
+        } catch (err) {
+          flashChatToast('Bad mockup schema: ' + (err?.message ?? err));
+        }
+      });
+    });
     HISTORY.scrollTop = HISTORY.scrollHeight;
+  }
+
+  // Parse a `MOCKUP_SCHEMA:{...}` line out of a mockup_schema tool's
+  // resultPreview. Returns the parsed schema object or null.
+  function parseMockupSchema(resultPreview) {
+    if (typeof resultPreview !== 'string') return null;
+    const m = resultPreview.match(/MOCKUP_SCHEMA:(\{[\s\S]*\})/);
+    if (!m) return null;
+    try { return JSON.parse(m[1]); } catch { return null; }
+  }
+
+  // Extract every `Saved: <abs-path-to-png>` reference from a tool-call
+  // resultPreview string. The generate_image tool always emits this on
+  // success. Returns an array of absolute paths (typically 0 or 1).
+  function extractGeneratedImagePaths(resultPreview) {
+    if (typeof resultPreview !== 'string') return [];
+    const rx = /Saved:\s*(.+?\.png)\b/g;
+    const out = [];
+    let m;
+    while ((m = rx.exec(resultPreview)) !== null) {
+      const p = m[1].trim();
+      // Restrict to ~/.hive/generated-images/ paths — the IPC handler will
+      // refuse anything else anyway, but skip rendering placeholders for
+      // off-folder paths.
+      if (/[\\\/]\.hive[\\\/]generated-images[\\\/]/.test(p)) out.push(p);
+    }
+    return out;
+  }
+
+  // Fullscreen viewer for a generated image. Shows Copy / Save / Send to
+  // Claude / Open folder / Drop on canvas actions.
+  function openGeneratedImageViewer(absPath, dataUrl) {
+    if (!dataUrl) return;
+    const overlay = document.createElement('div');
+    overlay.className = 'ls-chat-genimg-viewer';
+    overlay.innerHTML = `
+      <div class="ls-chat-genimg-viewer-card">
+        <img src="${dataUrl}" alt="Generated image" />
+        <div class="ls-chat-genimg-viewer-bar">
+          <button data-act="copy">Copy image</button>
+          <button data-act="share">Send to Claude</button>
+          <button data-act="save">Save…</button>
+          <button data-act="folder">Open folder</button>
+          <button data-act="canvas">Drop on canvas</button>
+          <div class="ls-chat-genimg-viewer-spacer"></div>
+          <button data-act="close">Close</button>
+        </div>
+      </div>
+    `;
+    document.documentElement.appendChild(overlay);
+    const dismiss = () => overlay.remove();
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) dismiss(); });
+    overlay.querySelectorAll('button[data-act]').forEach(b => {
+      b.addEventListener('click', async () => {
+        const act = b.dataset.act;
+        try {
+          if (act === 'close') dismiss();
+          else if (act === 'copy') {
+            const blob = await (await fetch(dataUrl)).blob();
+            await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+            flashChatToast('Image copied');
+          } else if (act === 'share') {
+            const res = await window.hive.shareImage(dataUrl);
+            if (!res?.ok) throw new Error(res?.error || 'share failed');
+            await navigator.clipboard.writeText(res.path);
+            flashChatToast('Path copied — Ctrl+V into Claude Code');
+          } else if (act === 'save') {
+            const a = document.createElement('a');
+            a.href = dataUrl;
+            a.download = absPath?.split(/[\\\/]/).pop() || `hive-image-${Date.now()}.png`;
+            document.body.appendChild(a); a.click(); a.remove();
+          } else if (act === 'folder') {
+            await window.hive.openGeneratedImagesFolder();
+          } else if (act === 'canvas') {
+            // Drop onto current canvas at centre — re-use canvas spawnImage if available
+            if (window.__lsCanvas?.spawnImageDataUrl) {
+              window.__lsCanvas.spawnImageDataUrl(dataUrl);
+              flashChatToast('Added to canvas');
+            } else {
+              flashChatToast('Canvas not open');
+            }
+          }
+        } catch (err) {
+          console.error('[chat genimg viewer]', err);
+          flashChatToast(`Failed: ${err?.message ?? err}`);
+        }
+      });
+    });
+    document.addEventListener('keydown', function esc(e) {
+      if (e.key === 'Escape') { dismiss(); document.removeEventListener('keydown', esc); }
+    });
+  }
+
+  // Tick once a second: update every pending bubble's elapsed-time chip.
+  // Colour escalates: purple < 20s, amber 20–60s, red > 60s — so a
+  // stuck/stalled call is visually obvious vs a slow one.
+  function tickElapsed() {
+    const now = Date.now();
+    document.querySelectorAll('.ls-chat-bubble.pending[data-pending-started]').forEach(b => {
+      const started = Number(b.dataset.pendingStarted);
+      if (!started) return;
+      const sec = Math.floor((now - started) / 1000);
+      const chip = b.querySelector('[data-elapsed]');
+      if (!chip) return;
+      const mm = Math.floor(sec / 60);
+      const ss = sec % 60;
+      chip.textContent = mm > 0 ? `${mm}:${String(ss).padStart(2, '0')}` : `${ss}s`;
+      chip.classList.toggle('stalled', sec >= 20 && sec < 60);
+      chip.classList.toggle('stuck',   sec >= 60);
+      if (sec >= 60) chip.title = 'Over 60s — likely stuck. Start a fresh chat (+ New) to abandon.';
+      else if (sec >= 20) chip.title = 'Slow — tools (web fetch, FXV read) can add 10–30s.';
+      else chip.title = 'In flight…';
+    });
+  }
+  setInterval(tickElapsed, 1000);
+  tickElapsed();
+
+  function addPendingImage(dataUrl, mime) {
+    if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:')) return;
+    pendingImages.push({ dataUrl, mime: mime || 'image/png' });
+    renderPendingAttachments();
+  }
+  function removePendingImage(idx) {
+    pendingImages.splice(idx, 1);
+    renderPendingAttachments();
+  }
+  function clearPendingImages() {
+    pendingImages = [];
+    renderPendingAttachments();
+  }
+  function renderPendingAttachments() {
+    const host = document.getElementById('ls-chat-attachments');
+    if (!host) return;
+    if (!pendingImages.length) {
+      host.style.display = 'none';
+      host.innerHTML = '';
+      return;
+    }
+    host.style.display = '';
+    host.innerHTML = pendingImages.map((img, i) => `
+      <div class="ls-chat-attachment" data-i="${i}" title="Click to remove">
+        <img src="${img.dataUrl}" alt="Attached" />
+        <button class="ls-chat-attachment-remove" data-remove-i="${i}" aria-label="Remove">×</button>
+      </div>
+    `).join('');
+    host.querySelectorAll('[data-remove-i]').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        removePendingImage(Number(btn.dataset.removeI));
+      });
+    });
+  }
+
+  function flashChatToast(msg) {
+    if (typeof window.flashToast === 'function') return window.flashToast(msg);
+    const el = document.createElement('div');
+    el.textContent = msg;
+    el.style.cssText = `
+      position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%);
+      background: #1d1d25; color: #f2f2f5; padding: 10px 18px; border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.12); font: 13px Inter, system-ui, sans-serif;
+      z-index: 100001; box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    `;
+    document.documentElement.appendChild(el);
+    setTimeout(() => el.remove(), 1600);
   }
 
   function renderMessage(m, i) {
     if (m.role === 'user') {
+      const imgs = Array.isArray(m.images) ? m.images : [];
       return `
         <div class="ls-chat-msg ls-chat-msg-user">
-          <div class="ls-chat-bubble ls-chat-bubble-user">${escapeHtml(m.content)}</div>
+          <div class="ls-chat-bubble ls-chat-bubble-user">
+            ${imgs.length ? `<div class="ls-chat-user-imgs">${imgs.map(u => `<img class="ls-chat-user-img" src="${u}" alt="Attached" />`).join('')}</div>` : ''}
+            ${m.content ? `<div class="ls-chat-user-text">${escapeHtml(m.content)}</div>` : ''}
+          </div>
         </div>
       `;
     }
@@ -192,6 +402,23 @@
     const tools = Array.isArray(m.toolCalls) ? m.toolCalls : [];
     const meta = [m.provider, m.model].filter(Boolean).join(' · ');
     const pendingCls = m.pending ? ' pending' : '';
+    // Gather any generated images from generate_image tool calls
+    const generatedImages = [];
+    for (const t of tools) {
+      if (t?.name === 'generate_image') {
+        for (const p of extractGeneratedImagePaths(t.resultPreview)) {
+          generatedImages.push({ path: p, input: t.input });
+        }
+      }
+    }
+    // Gather any mockup schemas emitted by mockup_schema tool calls
+    const mockupSchemas = [];
+    for (const t of tools) {
+      if (t?.name === 'mockup_schema') {
+        const schema = parseMockupSchema(t.resultPreview);
+        if (schema) mockupSchemas.push({ schema, input: t.input });
+      }
+    }
     return `
       <div class="ls-chat-msg ls-chat-msg-assistant">
         <div class="ls-chat-msg-h">
@@ -201,7 +428,34 @@
           ${tools.length ? `<button class="ls-chat-toolcalls-btn" data-toolcalls-i="${i}" title="Show tool calls">${tools.length} tool${tools.length === 1 ? '' : 's'}</button>` : ''}
           ${m.pending ? '' : `<button class="ls-chat-speak-btn" data-speak-i="${i}" title="Speak this reply">▶</button>`}
         </div>
-        <div class="ls-chat-bubble ls-chat-bubble-assistant${pendingCls}">${escapeHtml(m.content)}</div>
+        <div class="ls-chat-bubble ls-chat-bubble-assistant${pendingCls}"${m.pending && m.pendingStartedAt ? ` data-pending-started="${m.pendingStartedAt}"` : ''}>${escapeHtml(m.content)}${m.pending ? '<span class="ls-chat-elapsed" data-elapsed></span>' : ''}</div>
+        ${generatedImages.length ? `
+          <div class="ls-chat-genimgs">
+            ${generatedImages.map(g => `
+              <figure class="ls-chat-genimg-figure">
+                <img class="ls-chat-genimg" data-path="${escapeHtml(g.path)}" alt="Generated image" title="Click to open" />
+                <figcaption>${escapeHtml((g.input?.model ?? 'gpt-image-1') + ' · ' + (g.input?.size ?? '1024x1024') + (g.input?.quality === 'high' ? ' · HD' : ''))}</figcaption>
+              </figure>
+            `).join('')}
+          </div>
+        ` : ''}
+        ${mockupSchemas.length ? `
+          <div class="ls-chat-mockups">
+            ${mockupSchemas.map((m, j) => `
+              <div class="ls-chat-mockup-card" data-mockup-idx="${i}-${j}">
+                <div class="ls-chat-mockup-meta">
+                  <strong>${escapeHtml(m.schema.template ?? 'iphone')}</strong> · ${escapeHtml(m.schema.size ?? 'ig-portrait')}
+                  ${m.schema.background ? `· ${escapeHtml(m.schema.background)}` : ''}
+                </div>
+                ${m.schema.headline ? `<div class="ls-chat-mockup-headline">${escapeHtml(m.schema.headline)}</div>` : ''}
+                ${m.schema.statNumber ? `<div class="ls-chat-mockup-headline">${escapeHtml(m.schema.statNumber)} <span style="opacity:0.7">· ${escapeHtml(m.schema.statLabel ?? '')}</span></div>` : ''}
+                ${m.schema.methQuote ? `<div class="ls-chat-mockup-headline" style="font-style:italic;">"${escapeHtml(m.schema.methQuote)}"</div>` : ''}
+                ${m.schema.notes ? `<div class="ls-chat-mockup-notes">${escapeHtml(m.schema.notes)}</div>` : ''}
+                <button class="ls-chat-mockup-open" data-mockup-schema='${escapeHtml(JSON.stringify(m.schema))}'>Open in Mockup tool</button>
+              </div>
+            `).join('')}
+          </div>
+        ` : ''}
         ${tools.length ? `
           <div class="ls-chat-toolcalls" id="ls-chat-toolcalls-${i}" style="display:none;">
             ${tools.map(t => `
@@ -248,7 +502,8 @@
   async function send() {
     if (sending) return;
     const raw = INPUT.value.trim();
-    if (!raw) return;
+    // Allow image-only sends if there's at least one attached image
+    if (!raw && pendingImages.length === 0) return;
     const mentions = parseMentions(raw);
     // If any mentions, dispatch to those personas (plus the active one if not already included).
     // Otherwise dispatch to the active persona.
@@ -283,8 +538,19 @@
     const enableTools = !!TOOLS_TOGGLE.checked;
     const questionForLLM = stripMentions(rawText);
 
-    // Push user turn (verbatim including @ tokens — visible in transcript)
-    messages.push({ role: 'user', content: rawText, ts: Date.now(), kind: opts.kind });
+    // Snapshot + clear queued image attachments so they're sent once
+    const imagesForSend = pendingImages.slice();
+    clearPendingImages();
+
+    // Push user turn (verbatim including @ tokens — visible in transcript).
+    // Image attachments live on the message so they render in the bubble.
+    messages.push({
+      role: 'user',
+      content: rawText,
+      ts: Date.now(),
+      kind: opts.kind,
+      images: imagesForSend.length ? imagesForSend.map(i => i.dataUrl) : undefined,
+    });
     INPUT.value = '';
     autoresize();
 
@@ -302,6 +568,7 @@
         toolCalls: [],
         ts: Date.now(),
         pending: true,
+        pendingStartedAt: Date.now(),
       };
       messages.push(placeholder);
       return messages.length - 1;
@@ -326,11 +593,12 @@
       try {
         res = await window.hive.chatWithAdvisor({
           personaId,
-          question: questionForLLM,
+          question: questionForLLM || '(see attached image)',
           history: historyForCall,
           providerName,
           model,
           enableTools,
+          images: imagesForSend.length ? imagesForSend.map(i => i.dataUrl) : undefined,
         });
       } catch (err) {
         res = { ok: false, error: String(err?.message ?? err) };
@@ -621,4 +889,39 @@
   INPUT.addEventListener('input', () => { autoresize(); updateMentionPicker(); });
   INPUT.addEventListener('blur', () => setTimeout(closeMentionPicker, 120));
   NEW_BTN.addEventListener('click', newConversation);
+
+  // Paste images into chat — captures clipboard images from anywhere
+  // (Hive canvas right-click → Copy image, Windows Snipping Tool, screenshots, etc.)
+  // and queues them for the next send.
+  INPUT.addEventListener('paste', (e) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    let handled = false;
+    for (const item of items) {
+      if (item.type?.startsWith('image/')) {
+        const file = item.getAsFile();
+        if (!file) continue;
+        const reader = new FileReader();
+        reader.onload = () => { addPendingImage(reader.result, item.type); };
+        reader.readAsDataURL(file);
+        handled = true;
+      }
+    }
+    if (handled) e.preventDefault();
+  });
+  // Drag image files onto the input
+  INPUT.addEventListener('dragover', (e) => { e.preventDefault(); });
+  INPUT.addEventListener('drop', (e) => {
+    const files = e.dataTransfer?.files;
+    if (!files?.length) return;
+    let handled = false;
+    for (const f of files) {
+      if (!f.type?.startsWith('image/')) continue;
+      const reader = new FileReader();
+      reader.onload = () => addPendingImage(reader.result, f.type);
+      reader.readAsDataURL(f);
+      handled = true;
+    }
+    if (handled) e.preventDefault();
+  });
 }());

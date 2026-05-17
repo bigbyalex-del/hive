@@ -129,6 +129,7 @@ export const IPC = {
   DeployCommitRange: 'hive:deploy-commit-range',
   ReadGeneratedImage: 'hive:read-generated-image',
   OpenGeneratedImagesFolder: 'hive:open-generated-images-folder',
+  ShareImage: 'hive:share-image',
 } as const;
 
 export type AgentEvent =

@@ -200,6 +200,54 @@ export interface DraftWriteOpts {
   isoDate: string;            // YYYY-MM-DD
 }
 
+// Convert a draft's HeroSpec into a mockup tool schema (template + size
+// + props). Maps hero-stat → stat-spotlight, hero-quote → methodology,
+// hero-formula → iphone (with formula-y caption). Caller writes the
+// result as mockup.json next to the rest of the draft outputs.
+function deriveMockupSchema(opts: DraftWriteOpts): any {
+  const spec: any = opts.heroSpec;
+  if (!spec) return null;
+  if (spec.template === 'hero-stat') {
+    return {
+      template: 'stat-spotlight',
+      size: 'ig-portrait',
+      background: 'purple-haze',
+      halo: 'on',
+      showLogo: true,
+      statEyebrow: String(spec.KICKER ?? '').toUpperCase(),
+      statNumber: `${spec.STAT_VALUE ?? ''}${spec.STAT_UNIT ? ' ' + spec.STAT_UNIT : ''}`.trim(),
+      statLabel: String(spec.HEADLINE ?? spec.BODY ?? ''),
+      notes: `Auto-derived from hero-stat. Attribution: ${spec.ATTRIBUTION ?? ''}`,
+    };
+  }
+  if (spec.template === 'hero-quote') {
+    // Strip rich-text in quote down to plain text
+    const quotePlain = String(spec.QUOTE_HTML ?? '').replace(/<[^>]+>/g, '').trim();
+    return {
+      template: 'methodology',
+      size: 'ig-portrait',
+      background: 'brand-purple',
+      halo: 'on',
+      showLogo: true,
+      methQuote: quotePlain,
+      methCitation: String(spec.ATTRIBUTION ?? 'fxvperformance.com/methodology'),
+      notes: `Auto-derived from hero-quote. Takeaway: ${spec.TAKEAWAY ?? ''}`,
+    };
+  }
+  // hero-formula or unknown → hero iPhone with title as headline
+  return {
+    template: 'iphone',
+    size: 'ig-portrait',
+    background: 'purple-haze',
+    halo: 'on',
+    showCaption: true,
+    showLogo: true,
+    headline: String(spec.TITLE ?? opts.post.title ?? 'Train with intent.'),
+    subline: String(spec.SUBTITLE ?? 'AI-coached strength + aerobic.'),
+    notes: `Auto-derived from ${spec.template ?? 'unknown'} spec.`,
+  };
+}
+
 export function writeDraftFolder(opts: DraftWriteOpts): string {
   const folderName = `${opts.isoDate}-${opts.topic.slug}`;
   const folder = path.join(FXV_CONTENT_ROOT, 'drafts', folderName);
@@ -211,6 +259,14 @@ export function writeDraftFolder(opts: DraftWriteOpts): string {
   fs.writeFileSync(path.join(folder, 'ig-carousel.json'), JSON.stringify(opts.social.igCarousel, null, 2) + '\n', 'utf8');
   fs.writeFileSync(path.join(folder, 'tiktok-script.md'), opts.social.tiktokScript + '\n', 'utf8');
   fs.writeFileSync(path.join(folder, 'twitter-thread.md'), opts.social.twitterThread + '\n', 'utf8');
+
+  // mockup.json — schema the Hive iPhone Mockup tool can open one-click.
+  // Derived from the hero spec so the post and the social card share a
+  // visual story. Falls back to a sensible iphone-hero default.
+  const mockup = deriveMockupSchema(opts);
+  if (mockup) {
+    fs.writeFileSync(path.join(folder, 'mockup.json'), JSON.stringify(mockup, null, 2) + '\n', 'utf8');
+  }
 
   // hero.mp4 is already at heroMp4Path (we wrote it directly there during render).
   // If the render failed, no mp4 to write.

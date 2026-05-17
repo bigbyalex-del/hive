@@ -113,9 +113,24 @@ export class OpenAIProvider implements Provider {
     const client = await getOpenAI();
     const tools = opts.tools ?? (opts.cwd ? builtInTools(opts.cwd) : []);
 
+    // Initial user content: if images attached, send a content-block array
+    // (text + image_url blocks, base64 data URL form). Requires a
+    // vision-capable model (gpt-4o*, gpt-5*). Falls back to text only for
+    // non-vision models — caller is responsible for picking an appropriate
+    // model when attaching images.
+    let initialUserContent: any = opts.prompt;
+    if (opts.images?.length) {
+      initialUserContent = [
+        { type: 'text', text: opts.prompt },
+        ...opts.images.map(img => ({
+          type: 'image_url',
+          image_url: { url: `data:${img.mediaType || 'image/png'};base64,${img.base64}` },
+        })),
+      ];
+    }
     const messages: any[] = [
       { role: 'system', content: opts.systemPrompt },
-      { role: 'user', content: opts.prompt },
+      { role: 'user', content: initialUserContent },
     ];
 
     const toolDefs = tools.map(t => ({

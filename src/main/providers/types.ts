@@ -27,6 +27,11 @@ export interface RunOptions {
   // Used for full-codebase mode so the same snapshot can be shared across
   // every persona call (Council/Ship Audit) — one cache write, many reads.
   cachedPrefix?: string;
+  // Optional images attached to the initial user message. Each entry is
+  // raw base64 (no data: prefix) + the corresponding mediaType (e.g.
+  // 'image/png'). Provider implementations decide how to encode for their
+  // API (Anthropic: image source.base64 block; OpenAI: image_url block).
+  images?: { mediaType: string; base64: string }[];
 }
 
 export interface RunResult {

@@ -103,6 +103,7 @@ const IPC = {
   DeployCommitRange: 'hive:deploy-commit-range',
   ReadGeneratedImage: 'hive:read-generated-image',
   OpenGeneratedImagesFolder: 'hive:open-generated-images-folder',
+  ShareImage: 'hive:share-image',
 };
 
 contextBridge.exposeInMainWorld('hive', {
@@ -134,6 +135,7 @@ contextBridge.exposeInMainWorld('hive', {
   },
   captureScreen: () => ipcRenderer.invoke(IPC.CaptureScreen),
   snipRegion: () => ipcRenderer.invoke(IPC.SnipRegion),
+  shareImage: (dataUrl: string) => ipcRenderer.invoke(IPC.ShareImage, dataUrl),
   speak: (text: string) => ipcRenderer.invoke(IPC.Speak, text),
   onManagerSpoke: (cb: (text: string) => void) => {
     const listener = (_: Electron.IpcRendererEvent, text: string) => cb(text);

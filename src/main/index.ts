@@ -1,5 +1,6 @@
-import { app, BrowserWindow, ipcMain, globalShortcut, nativeImage, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain, globalShortcut, nativeImage, dialog, Menu, MenuItem } from 'electron';
 import * as path from 'path';
+import * as fs from 'fs';
 import * as dotenv from 'dotenv';
 import { Orchestrator } from './orchestrator';
 import { IPC, AgentEvent } from '../shared/types';
@@ -159,7 +160,50 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      spellcheck: true,
     },
+  });
+
+  // British English spellcheck (falls back to en-US automatically if dictionary missing)
+  try {
+    mainWindow.webContents.session.setSpellCheckerLanguages(['en-GB']);
+  } catch (err) {
+    console.warn('[hive] could not set en-GB spellcheck:', err);
+  }
+
+  // Spellcheck context menu — right-click on a misspelled word in any
+  // <input>/<textarea>/contenteditable shows suggestions + "Add to dictionary".
+  mainWindow.webContents.on('context-menu', (_event, params) => {
+    if (!mainWindow) return;
+    if (!params.misspelledWord && !params.isEditable) return;
+    const menu = new Menu();
+    if (params.misspelledWord) {
+      const suggestions = params.dictionarySuggestions || [];
+      if (suggestions.length === 0) {
+        menu.append(new MenuItem({ label: 'No suggestions', enabled: false }));
+      } else {
+        for (const s of suggestions.slice(0, 6)) {
+          menu.append(new MenuItem({
+            label: s,
+            click: () => mainWindow?.webContents.replaceMisspelling(s),
+          }));
+        }
+      }
+      menu.append(new MenuItem({ type: 'separator' }));
+      menu.append(new MenuItem({
+        label: 'Add to dictionary',
+        click: () => mainWindow?.webContents.session.addWordToSpellCheckerDictionary(params.misspelledWord),
+      }));
+      menu.append(new MenuItem({ type: 'separator' }));
+    }
+    // Standard editing actions
+    if (params.isEditable) {
+      menu.append(new MenuItem({ role: 'cut',   enabled: params.editFlags.canCut }));
+      menu.append(new MenuItem({ role: 'copy',  enabled: params.editFlags.canCopy }));
+      menu.append(new MenuItem({ role: 'paste', enabled: params.editFlags.canPaste }));
+      menu.append(new MenuItem({ role: 'selectAll' }));
+    }
+    if (menu.items.length) menu.popup({ window: mainWindow });
   });
 
   mainWindow.loadFile(path.join(__dirname, '..', '..', 'src', 'renderer', 'index.html'));
@@ -395,6 +439,30 @@ app.whenReady().then(async () => {
     try {
       const result = await snipRegion();
       return { ok: true, ...result };
+    } catch (err: any) {
+      return { ok: false, error: err?.message ?? String(err) };
+    }
+  });
+
+  // Save an image (data URL) to a fixed share folder and return its
+  // absolute path. Used by the canvas right-click menu so the user can
+  // paste that path into Claude Code, which can read the file directly.
+  ipcMain.handle(IPC.ShareImage, async (_e, dataUrl: string) => {
+    try {
+      if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:')) {
+        throw new Error('expected data URL');
+      }
+      const m = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+      if (!m) throw new Error('not a base64 data URL');
+      const mime = m[1];
+      const b64 = m[2];
+      const ext = (mime.split('/')[1] || 'png').replace(/[^a-z0-9]/gi, '');
+      const dir = path.join(process.env.USERPROFILE || 'C:\\Users\\Fusion', 'hive-shared');
+      fs.mkdirSync(dir, { recursive: true });
+      const ts = new Date().toISOString().replace(/[:.]/g, '-');
+      const file = path.join(dir, `share-${ts}.${ext}`);
+      fs.writeFileSync(file, Buffer.from(b64, 'base64'));
+      return { ok: true, path: file };
     } catch (err: any) {
       return { ok: false, error: err?.message ?? String(err) };
     }

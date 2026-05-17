@@ -510,6 +510,10 @@
           <svg class="ls-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
           <span>Drafts</span>
         </div>
+        <div class="ls-nav-item" data-view="mockups" title="iPhone marketing mockup tool (1080×1350)">
+          <svg class="ls-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="6" y="2" width="12" height="20" rx="3"/><line x1="11" y1="18" x2="13" y2="18"/></svg>
+          <span>Mockups</span>
+        </div>
       </div>
 
       <div class="ls-nav-sec" id="ls-projects-section" style="display:none;">
@@ -786,6 +790,8 @@
           <select class="ls-chat-provider" id="ls-chat-provider" title="Provider"></select>
           <select class="ls-chat-model" id="ls-chat-model" title="Model"></select>
         </div>
+        <!-- Thumbnail strip for pasted/dropped images, populated by chat.js -->
+        <div class="ls-chat-attachments" id="ls-chat-attachments" style="display:none;"></div>
         <div class="ls-chat-input-bar">
           <button class="ls-chat-mic" id="ls-chat-mic" title="Voice input — click to start/stop dictation">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
@@ -798,10 +804,21 @@
     </div>
   </div>
 
+  <!-- iPhone mockup tool — full-screen overlay launched from Mockups nav
+       or from canvas right-click → "Open in iPhone mockup". -->
+  <div class="ls-mockup-shell" id="ls-mockup-shell">
+    <div class="ls-mockup-header">
+      <span class="ls-mockup-title">iPhone Mockup · 1080×1350</span>
+      <button class="ls-mockup-close" id="ls-mockup-close" title="Close (Esc)">×</button>
+    </div>
+    <iframe class="ls-mockup-frame" id="ls-mockup-frame" title="iPhone mockup tool"></iframe>
+  </div>
+
   <script src="vendor/konva.min.js"></script>
   <script src="app.js"></script>
   <script src="canvas.js"></script>
   <script src="chat.js"></script>
   <script src="deploys.js"></script>
+  <script src="mockup.js"></script>
 </body>
 </html>

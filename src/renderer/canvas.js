@@ -331,6 +331,222 @@
         }
       }
     });
+
+    // Right-click on an image → Copy / Save context menu.
+    // (Mind-nodes and stickies cancel bubble on their own contextmenu
+    // handlers; this stage-level handler only fires for everything else.)
+    stage.on('contextmenu', (e) => {
+      const img = findImageFromEvent(e);
+      console.log('[hive canvas] contextmenu', {
+        targetClass: e.target?.className,
+        targetType: e.target?.constructor?.name,
+        foundImage: !!img,
+        hasDataUrl: !!img?.getAttr?.('dataUrl'),
+      });
+      if (!img) return;
+      e.evt?.preventDefault();
+      e.cancelBubble = true;
+      const cx = e.evt?.clientX ?? 0;
+      const cy = e.evt?.clientY ?? 0;
+      showImageContextMenu(img, cx, cy);
+    });
+  }
+
+  // Resolve an image from a contextmenu event. Handles three cases:
+  // (1) target is the Konva.Image itself
+  // (2) target is a Transformer anchor — fall back to whatever's selected
+  // (3) target is some descendant — walk up to find an Image ancestor
+  function findImageFromEvent(e) {
+    let t = e.target;
+    // Direct hit
+    if (t && t.className === 'Image') return t;
+    // Walk up parents
+    let p = t?.getParent?.();
+    while (p) {
+      if (p.className === 'Image') return p;
+      p = p.getParent?.();
+    }
+    // Transformer anchor → use whatever the transformer is attached to
+    if (t && (t.className === 'Rect' || t.className === 'Circle') && t.getParent?.()?.className === 'Transformer') {
+      const tr = t.getParent();
+      const nodes = tr.nodes?.() ?? [];
+      for (const n of nodes) {
+        if (n.className === 'Image') return n;
+      }
+    }
+    // Fallback: if the renderer-level transformer has a single Image selected,
+    // treat that as the right-click target even if e.target wasn't the image.
+    if (typeof transformer !== 'undefined' && transformer?.nodes) {
+      const sel = transformer.nodes();
+      if (sel.length === 1 && sel[0].className === 'Image') return sel[0];
+    }
+    return null;
+  }
+
+  function dismissImageContextMenu() {
+    document.getElementById('hive-img-ctxmenu')?.remove();
+  }
+
+  function showImageContextMenu(imgNode, x, y) {
+    dismissImageContextMenu();
+    const menu = document.createElement('div');
+    menu.id = 'hive-img-ctxmenu';
+    menu.style.cssText = `
+      position: fixed; left: ${x}px; top: ${y}px; z-index: 99999;
+      background: #15151b; border: 1px solid rgba(255,255,255,0.14);
+      border-radius: 10px; padding: 4px; min-width: 180px;
+      box-shadow: 0 12px 36px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.06);
+      font-family: Inter, system-ui, sans-serif; font-size: 13px; color: #f2f2f5;
+      user-select: none;
+    `;
+    const items = [
+      { label: 'Copy image',          run: () => copyImageToClipboard(imgNode) },
+      { label: 'Send to Claude…',     run: () => shareImageToClaude(imgNode) },
+      { label: 'Open in iPhone mockup', run: () => openInMockup(imgNode) },
+      { label: 'Copy data URL',       run: () => copyImageDataUrl(imgNode) },
+      { label: 'Save image…',         run: () => saveImageAs(imgNode) },
+      { sep: true },
+      { label: 'Delete',              run: () => { imgNode.destroy(); layer.draw(); markDirty(true); } },
+    ];
+    for (const it of items) {
+      if (it.sep) {
+        const sep = document.createElement('div');
+        sep.style.cssText = 'height:1px;margin:4px 0;background:rgba(255,255,255,0.08);';
+        menu.appendChild(sep);
+        continue;
+      }
+      const row = document.createElement('div');
+      row.textContent = it.label;
+      row.style.cssText = 'padding:7px 12px;border-radius:6px;cursor:pointer;';
+      row.addEventListener('mouseenter', () => row.style.background = 'rgba(255,255,255,0.06)');
+      row.addEventListener('mouseleave', () => row.style.background = '');
+      row.addEventListener('click', () => {
+        dismissImageContextMenu();
+        try { it.run(); } catch (err) { console.error('[hive ctxmenu]', err); }
+      });
+      menu.appendChild(row);
+    }
+    document.documentElement.appendChild(menu);   // <html> rather than <body> — body may have a transform that breaks position:fixed
+    // Clamp inside viewport
+    const r = menu.getBoundingClientRect();
+    if (r.right > window.innerWidth)  menu.style.left = `${window.innerWidth - r.width - 8}px`;
+    if (r.bottom > window.innerHeight) menu.style.top  = `${window.innerHeight - r.height - 8}px`;
+    console.log('[hive canvas] menu appended', {
+      inDom: !!document.getElementById('hive-img-ctxmenu'),
+      rect: { left: r.left, top: r.top, width: r.width, height: r.height },
+      computedZ: getComputedStyle(menu).zIndex,
+      computedDisplay: getComputedStyle(menu).display,
+      computedVisibility: getComputedStyle(menu).visibility,
+    });
+    // Dismiss on outside click / Esc — defer attaching the mousedown
+    // listener until the *next* click so the right-click that opened the
+    // menu doesn't immediately close it.
+    requestAnimationFrame(() => {
+      const off = (e) => {
+        if (!menu.contains(e.target)) { dismissImageContextMenu(); document.removeEventListener('mousedown', off, true); }
+      };
+      document.addEventListener('mousedown', off, true);
+    });
+    document.addEventListener('keydown', function esc(e) {
+      if (e.key === 'Escape') { dismissImageContextMenu(); document.removeEventListener('keydown', esc); }
+    });
+  }
+
+  function dataUrlToBlob(dataUrl) {
+    const [meta, b64] = dataUrl.split(',');
+    const mime = (meta.match(/data:([^;]+)/) || [, 'image/png'])[1];
+    const bin = atob(b64);
+    const arr = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    return new Blob([arr], { type: mime });
+  }
+
+  async function copyImageToClipboard(imgNode) {
+    const dataUrl = imgNode.getAttr('dataUrl');
+    if (!dataUrl) { flashCanvasToast('No image data'); return; }
+    try {
+      // Browsers only allow image/png in ClipboardItem reliably — if source
+      // is jpg/webp, rasterise through a canvas to convert.
+      let blob = dataUrlToBlob(dataUrl);
+      if (blob.type !== 'image/png') {
+        const img = new Image();
+        await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = dataUrl; });
+        const c = document.createElement('canvas');
+        c.width = img.naturalWidth; c.height = img.naturalHeight;
+        c.getContext('2d').drawImage(img, 0, 0);
+        blob = await new Promise(res => c.toBlob(res, 'image/png'));
+      }
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+      flashCanvasToast('Image copied');
+    } catch (err) {
+      console.error('[hive copy image]', err);
+      flashCanvasToast(`Copy failed: ${err?.message ?? err}`);
+    }
+  }
+
+  async function copyImageDataUrl(imgNode) {
+    const dataUrl = imgNode.getAttr('dataUrl');
+    if (!dataUrl) { flashCanvasToast('No image data'); return; }
+    try {
+      await navigator.clipboard.writeText(dataUrl);
+      flashCanvasToast('Data URL copied');
+    } catch (err) {
+      flashCanvasToast(`Copy failed: ${err?.message ?? err}`);
+    }
+  }
+
+  // Open the right-clicked image in the iPhone mockup overlay,
+  // pre-loaded onto the phone screen.
+  function openInMockup(imgNode) {
+    const dataUrl = imgNode.getAttr('dataUrl');
+    if (!dataUrl) { flashCanvasToast('No image data'); return; }
+    if (!window.__lsMockup?.open) { flashCanvasToast('Mockup tool not loaded'); return; }
+    window.__lsMockup.open(dataUrl);
+  }
+
+  // Save the image to ~/hive-shared and copy the absolute file path to
+  // clipboard so the user can paste it straight into Claude Code (which
+  // can Read a local PNG by path).
+  async function shareImageToClaude(imgNode) {
+    const dataUrl = imgNode.getAttr('dataUrl');
+    if (!dataUrl) { flashCanvasToast('No image data'); return; }
+    try {
+      const res = await window.hive.shareImage(dataUrl);
+      if (!res?.ok) throw new Error(res?.error || 'share failed');
+      await navigator.clipboard.writeText(res.path);
+      flashCanvasToast('Path copied — Ctrl+V into Claude Code');
+    } catch (err) {
+      console.error('[hive share image]', err);
+      flashCanvasToast(`Share failed: ${err?.message ?? err}`);
+    }
+  }
+
+  function saveImageAs(imgNode) {
+    const dataUrl = imgNode.getAttr('dataUrl');
+    if (!dataUrl) { flashCanvasToast('No image data'); return; }
+    const mime = (dataUrl.match(/data:([^;]+)/) || [, 'image/png'])[1];
+    const ext = mime.split('/')[1] || 'png';
+    const a = document.createElement('a');
+    a.href = dataUrl;
+    a.download = `hive-image-${Date.now()}.${ext}`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+
+  function flashCanvasToast(msg) {
+    // Reuse the renderer's flashToast if available, otherwise inline.
+    if (typeof window.flashToast === 'function') return window.flashToast(msg);
+    const el = document.createElement('div');
+    el.textContent = msg;
+    el.style.cssText = `
+      position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%);
+      background: #1d1d25; color: #f2f2f5; padding: 10px 18px; border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.12); font: 13px Inter, system-ui, sans-serif;
+      z-index: 100000; box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    `;
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 1600);
   }
 
   function stageCenter() {
@@ -2370,6 +2586,10 @@
 
   async function open() {
     console.log('[hive canvas] open() — body classes:', document.body.className);
+    // Close any other overlays that would sit on top of the canvas
+    window.__lsChat?.close?.();
+    window.__lsDeploys?.close?.();
+    window.__lsMockup?.close?.();
     document.body.classList.add('canvas-active');
     SHELL.style.display = '';
     SHELL.style.visibility = 'visible';
@@ -2396,7 +2616,19 @@
     document.body.classList.remove('canvas-active');
   }
 
-  window.__lsCanvas = { open, close, isVisible };
+  window.__lsCanvas = {
+    open,
+    close,
+    isVisible,
+    // Public helper for other modules (e.g. chat) to drop an image
+    // straight onto the centre of the current canvas. Auto-opens the
+    // canvas first if it's not visible.
+    spawnImageDataUrl: async (dataUrl) => {
+      if (!isVisible()) await open();
+      const c = stageCenter();
+      spawnImage(dataUrl, c.x, c.y);
+    },
+  };
 
   // Wire sidebar nav click into open() — kick off the watcher whenever
   // the canvas view opens so new iPhone screenshots refresh the grid.

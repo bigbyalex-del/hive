@@ -433,7 +433,19 @@ export class AnthropicProvider implements Provider {
       input_schema: t.schema,
     }));
 
-    const messages: any[] = [{ role: 'user', content: opts.prompt }];
+    // Initial user turn: if images attached, send a content-block array
+    // (text + image blocks). Otherwise plain string content.
+    let initialContent: any = opts.prompt;
+    if (opts.images?.length) {
+      initialContent = [
+        ...opts.images.map(img => ({
+          type: 'image',
+          source: { type: 'base64', media_type: img.mediaType || 'image/png', data: img.base64 },
+        })),
+        { type: 'text', text: opts.prompt },
+      ];
+    }
+    const messages: any[] = [{ role: 'user', content: initialContent }];
     let inputTokens = 0;
     let outputTokens = 0;
     let turns = 0;

@@ -275,6 +275,42 @@ Always ask the user before generating — don't use speculatively.`,
       },
     },
     {
+      name: 'mockup_schema',
+      description: `Emit a marketing mockup schema (template + size + content) that the user can open in one click in the iPhone Mockup tool. Use when the user asks you to draft IG / X / LinkedIn / ASC posts. Available templates: 'iphone' (hero), 'watch' (Apple Watch), 'ecosystem' (phone+watch), 'stat-spotlight' (big number + label), 'methodology' (quote + citation), 'comparison' (two phones).
+Available sizes: 'ig-square', 'ig-portrait' (default), 'ig-story', 'twitter', 'linkedin', 'facebook', 'youtube', 'asc-6.9', 'asc-6.1', 'asc-ipad-13', 'web-hero', 'og-image'.
+Available backgrounds: 'purple-haze' (default), 'shimmer', 'brand-purple', 'dark', 'white'.
+Always honour FXV brand rules — no emoji, performance-first language, RPE-anchored copy.`,
+      schema: {
+        type: 'object',
+        properties: {
+          template: { type: 'string', enum: ['iphone','watch','ecosystem','stat-spotlight','methodology','comparison'] },
+          size: { type: 'string', description: 'one of the supported size keys; defaults to ig-portrait' },
+          background: { type: 'string', description: 'purple-haze | shimmer | brand-purple | dark | white' },
+          halo: { type: 'string', description: 'on | cyan | off' },
+          headline: { type: 'string', description: 'caption headline (iphone/watch/ecosystem)' },
+          subline: { type: 'string', description: 'caption subline' },
+          showCaption: { type: 'boolean' },
+          showLogo: { type: 'boolean' },
+          statEyebrow: { type: 'string' },
+          statNumber: { type: 'string' },
+          statLabel: { type: 'string' },
+          methQuote: { type: 'string' },
+          methCitation: { type: 'string' },
+          cmpLabelLeft: { type: 'string' },
+          cmpLabelRight: { type: 'string' },
+          notes: { type: 'string', description: 'short rationale for the chosen layout — surfaced to the user' },
+        },
+        required: ['template'],
+      },
+      run: async (input) => {
+        // Emit the schema in a tagged form the chat renderer detects to
+        // render an "Open in Mockup" button. The tag prefix lets the
+        // renderer pick it out reliably even when wrapped in markdown.
+        const schema = { ...input };
+        return `MOCKUP_SCHEMA:${JSON.stringify(schema)}`;
+      },
+    },
+    {
       name: 'hive_actions',
       description: 'List currently OPEN Actions tracked in Hive (todo/in_progress/in_review/blocked). Returns id, persona, status, priority, content. Use to answer "what is in-flight right now" without you having to retype the list.',
       schema: {
@@ -343,6 +379,10 @@ export interface ChatRequest {
   providerName?: ProviderName;
   model?: string;
   enableTools?: boolean;
+  // Attached images (data URLs). Forwarded to the provider's RunOptions
+  // as base64 + mediaType. Anthropic supports image input on every Claude
+  // model from 3.x onward. OpenAI requires a vision-capable model.
+  images?: string[];
 }
 
 export interface ChatResult {
@@ -386,6 +426,9 @@ Read-only:
 Image generation (asks user first):
 - generate_image: produce a PNG via OpenAI / Flux / Imagen. Saves to ~/.hive/generated-images/.
 
+Marketing (no cost):
+- mockup_schema: emit a marketing post schema. User can one-click open it in the iPhone Mockup tool to render at any size. Use this when the user asks to draft IG / X / LinkedIn / ASC posts — return one mockup_schema per draft so they get one button per post.
+
 Action management (use carefully):
 - hive_action_update_status: change an action's status (todo, in_progress, done, cancelled, etc.)
 - hive_action_delete: permanently remove an action
@@ -401,11 +444,18 @@ Use tools when answering would benefit from live data. Don't tool-call gratuitou
 
   const toolCalls: ChatResult['toolCalls'] = [];
 
+  // Parse data URLs into the (mediaType, base64) shape the provider expects.
+  const imageBlocks = (req.images ?? []).flatMap(dataUrl => {
+    const m = typeof dataUrl === 'string' && dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+    return m ? [{ mediaType: m[1], base64: m[2] }] : [];
+  });
+
   const runOpts: RunOptions = {
     systemPrompt,
     prompt,
     tools,
     maxTurns: 8,
+    images: imageBlocks.length ? imageBlocks : undefined,
   };
 
   const result = await provider.run(model, runOpts, {

@@ -4253,6 +4253,7 @@ window.__extractActionsFor = async (personaId, question, reply) => {
       specialists: 'Specialists', pulse: 'Pulse', drafts: 'Drafts',
       deploys: 'Deploys', alerts: 'Alerts', council: 'Council',
       'ship-audit': 'Ship audit', canvas: 'Canvas', chat: 'Chat',
+      mockups: 'Mockups',
     })[view] || view;
   }
 
@@ -4268,6 +4269,13 @@ window.__extractActionsFor = async (personaId, question, reply) => {
       const v = el.dataset.view;
       if (v === 'canvas') { setActiveNav('canvas'); return; }
       closeCanvasIfOpen();
+      if (v === 'mockups') {
+        setActiveNav('mockups');
+        window.__lsDeploys?.close?.();
+        window.__lsChat?.close?.();
+        window.__lsMockup?.open?.();
+        return;
+      }
       if (v === 'chat') {
         setActiveNav('chat');
         window.__lsDeploys?.close?.();
